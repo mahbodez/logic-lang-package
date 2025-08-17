@@ -461,9 +461,6 @@ constraint suspicious >> high_birads weight=0.6
 ### 5. Comparison Constraints
 Use soft comparison operators for ordinal and threshold relationships:
 ```
-### 5. Comparison Constraints
-Use soft comparison operators for ordinal and threshold relationships:
-```
 # Risk stratification with thresholds
 define high_risk = risk_score > 0.8
 define low_risk = risk_score < 0.2
@@ -520,7 +517,7 @@ define high_risk_patients = patient_data[:3]  # First 3 patients
 define feature_subset = features[:, 2:5]  # Specific feature range
 define consensus_subset = & high_risk_patients
 constraint consensus_subset >> intensive_monitoring weight=1.0
-```
+
 
 # Equality constraints for consistency
 define balanced_breasts = equals(risk_L, risk_R)
@@ -531,7 +528,7 @@ define valid_range = (score >= 0.1) & (score <= 0.9)
 constraint valid_range weight=1.0
 ```
 
-### 6. Ordinal Relationships
+### 9. Ordinal Relationships
 Model ordered classifications with comparison operators:
 ```
 # BI-RADS ordering constraints
