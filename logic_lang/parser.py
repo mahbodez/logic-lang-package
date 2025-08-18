@@ -1,7 +1,7 @@
 """
-Parser for the rule language.
+Parser for the Logic language.
 
-Implements a recursive descent parser that converts rule scripts into AST.
+Implements a recursive descent parser that converts logic scripts into AST.
 The grammar supports:
 - Variable expectations: expect var1, var2, var3
 - Variable definitions: define var_name = expression
@@ -30,7 +30,7 @@ class Token:
 
 
 class Lexer:
-    """Tokenizes rule language input."""
+    """Tokenizes logic language input."""
 
     # Token patterns
     TOKEN_PATTERNS = [
@@ -112,7 +112,7 @@ class Lexer:
 
 
 class RuleParser:
-    """Recursive descent parser for rule language."""
+    """Recursive descent parser for logic language."""
 
     def __init__(self):
         self.tokens = []

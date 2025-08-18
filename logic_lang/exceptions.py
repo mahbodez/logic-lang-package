@@ -1,12 +1,12 @@
 """
-Custom exceptions for the rule language system.
+Custom exceptions for the logic language system.
 """
 
 from typing import List
 
 
 class RuleLanguageError(Exception):
-    """Base exception for all rule language errors."""
+    """Base exception for all logic language errors."""
 
     pass
 

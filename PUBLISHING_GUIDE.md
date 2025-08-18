@@ -187,7 +187,7 @@ Your package provides:
 - **RuleInterpreter**: Execute parsed rules to generate constraints
 - **Soft Logic Operations**: Various constraint types and semantics
 - **Loss Functions**: Integration with PyTorch for training
-- **AST Nodes**: Complete AST representation for rule language
+- **AST Nodes**: Complete AST representation for logic language
 - **Exception Handling**: Comprehensive error types for rule processing
 
 ## Next Steps

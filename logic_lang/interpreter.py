@@ -1,5 +1,5 @@
 """
-Interpreter for the rule language.
+Interpreter for the logic language.
 
 Executes parsed AST to generate constraint objects using the soft logic framework.
 The interpreter maintains a variable environment and provides built-in functions
@@ -35,7 +35,7 @@ TensorTruth = Union[Tensor, Truth]
 
 class RuleInterpreter:
     """
-    Interpreter for rule language scripts.
+    Interpreter for logic language scripts.
 
     The RuleInterpreter executes parsed AST to generate constraint objects using
     the soft logic framework. It maintains a variable environment and provides
@@ -94,7 +94,7 @@ class RuleInterpreter:
         Execute a rule script and return constraint set.
 
         Args:
-            script: Rule language script text
+            script: Logic language script text
             features: Dictionary of feature tensors (e.g., from model output)
 
         Returns:

@@ -1,5 +1,5 @@
 """
-Rule Language for Soft Logic Constraints
+Logic Language for Soft Logic Constraints
 ========================================
 
 A domain-specific language (DSL) for defining soft logic constraints in medical imaging.
@@ -9,8 +9,8 @@ hard-coded constraint logic with flexible, configurable rule sets.
 Components:
 - `parser`: Parses rule scripts into abstract syntax tree (AST)
 - `interpreter`: Executes parsed rules to generate constraint objects
-- `ast_nodes`: AST node definitions for rule language constructs
-- `exceptions`: Custom exceptions for rule language errors
+- `ast_nodes`: AST node definitions for logic language constructs
+- `exceptions`: Custom exceptions for logic language errors
 
 Example usage:
 ```python

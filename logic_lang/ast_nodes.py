@@ -1,7 +1,7 @@
 """
-Abstract Syntax Tree (AST) nodes for the rule language.
+Abstract Syntax Tree (AST) nodes for the logic language.
 
-These classes represent the parsed structure of rule language constructs.
+These classes represent the parsed structure of logic language constructs.
 Each node type corresponds to a different language element like expressions,
 statements, and operators.
 """

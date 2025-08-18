@@ -1,8 +1,10 @@
-# Rule Language Documentation
+# Logic Language Documentation
+
+![Logo](logo.png)
 
 ## Overview
 
-The Rule Language is a domain-specific language (DSL) designed for defining soft logic constraints in mammography classification. It allows you to replace hard-coded constraint logic with flexible, interpretable rule scripts that can be modified without changing Python code.
+The Logic Language is a domain-specific language (DSL) designed for defining soft logic constraints in mammography classification. It allows you to replace hard-coded constraint logic with flexible, interpretable logic scripts that can be modified without changing Python code.
 
 ## Syntax Reference
 
@@ -334,7 +336,7 @@ const important_classes = [4, 5, 6]  # Can store list constants
 
 ### Mixed Type Expressions
 
-The rule language automatically handles mixed types in expressions:
+The logic language automatically handles mixed types in expressions:
 ```
 # Tensor compared with literal number
 define high_values = predictions > 0.5
@@ -579,7 +581,7 @@ constraint birads_3_higher & birads_4_higher weight=0.8
 
 ## Error Handling
 
-The rule language provides helpful error messages for common issues:
+The logic language provides helpful error messages for common issues:
 
 ### Syntax Errors
 
@@ -633,7 +635,7 @@ Choose different logical semantics:
 - **Product**: multiplication operations (independent probabilities)
 
 ```python
-loss_fn = RuleBasedMammoConstraintsLoss(
+loss_fn = RuleMammoLoss(
     feature_indices=indices,
     rules=rules,
     semantics="lukasiewicz"  # or "godel", "product"
@@ -651,10 +653,10 @@ loss_fn = RuleBasedMammoConstraintsLoss(
 
 ## Migration from Hard-coded Constraints
 
-To convert existing hard-coded constraints to rule language:
+To convert existing hard-coded constraints to logic language:
 
 1. **Identify logical patterns** in your constraint code
 2. **Extract variable definitions** for reused expressions
-3. **Convert constraints** to rule language syntax
+3. **Convert constraints** to logic language syntax
 4. **Test equivalence** with the original implementation
 5. **Refine and optimize** weights and transforms
