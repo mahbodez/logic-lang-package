@@ -26,8 +26,8 @@ pip install logic-lang
 from logic_lang import RuleInterpreter
 
 interpreter = RuleInterpreter()
-features = {"predictions": torch.tensor([[0.8, 0.1, 0.1]])} # must have batch dim
-script = "constraint exactly_one(predictions);" # or load from a .logic file
+features = {"predictions": torch.tensor([[0.8, 0.1, 0.1]])} 
+script = "constraint exactly_one(predictions);" # also can load from .logic files
 constraint_set = interpreter.execute(script, features)
 ```
 
