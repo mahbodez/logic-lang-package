@@ -6,6 +6,31 @@
 
 The Logic Language is a domain-specific language (DSL) designed for defining soft logic constraints in mammography classification. It allows you to replace hard-coded constraint logic with flexible, interpretable logic scripts that can be modified without changing Python code.
 
+## Installation
+
+Install the package using pip:
+
+```bash
+pip install logic-lang
+```
+
+### Requirements
+
+- Python 3.8 or higher
+- PyTorch 1.9.0 or higher
+- NumPy 1.20.0 or higher
+
+### Quick Start
+
+```python
+from logic_lang import RuleInterpreter
+
+interpreter = RuleInterpreter()
+features = {"predictions": torch.tensor([[0.8, 0.1, 0.1]])} # must have batch dim
+script = "constraint exactly_one(predictions);" # or load from a .logic file
+constraint_set = interpreter.execute(script, features)
+```
+
 ## Syntax Reference
 
 ### Comments
