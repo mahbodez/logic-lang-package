@@ -7,6 +7,7 @@ The Rule Language is a domain-specific language (DSL) designed for defining soft
 ## Syntax Reference
 
 ### Comments
+
 Comments start with `#` and continue to the end of the line:
 ```
 # This is a comment
@@ -14,18 +15,21 @@ define findings_L = mass_L | mc_L  # Inline comment
 ```
 
 ### Variable Definitions
+
 Define new variables using logical combinations of existing features:
 ```
 define variable_name = expression
 ```
 
 ### Constant Definitions
+
 Define constants for reusable literal values:
 ```
 const constant_name = value
 ```
 
 ### Variable Expectations
+
 Declare which variables (features) the script expects to be provided:
 ```
 expect variable_name
@@ -57,6 +61,7 @@ define threshold_check = risk_score >= high_threshold
 ```
 
 ### Constraints
+
 Define constraints that will be enforced during training:
 ```
 constraint expression [weight=value] [transform="type"] [param=value ...]
@@ -147,6 +152,7 @@ constraint exactly_one(comp) weight=1.5 transform="hinge" alpha=2.0
    ```
 
 ### Parentheses
+
 Use parentheses to override operator precedence:
 ```
 define complex = (mass_L | mc_L) & ~(birads_L >> findings_L)
@@ -155,6 +161,7 @@ define complex = (mass_L | mc_L) & ~(birads_L >> findings_L)
 ## Statement Separation
 
 ### Semicolons
+
 You can use semicolons (`;`) to separate multiple statements on a single line, similar to Python:
 
 ```
@@ -171,6 +178,7 @@ const low = 0.2; const high = 0.8; define range_check = value >= low & value <= 
 ```
 
 ### Line-based Separation
+
 Statements can also be separated by newlines (traditional approach):
 ```
 expect findings_L, findings_R
@@ -179,6 +187,7 @@ constraint bilateral weight=0.6
 ```
 
 ### Trailing Semicolons
+
 Trailing semicolons are optional and ignored:
 ```
 expect variables;
@@ -189,6 +198,7 @@ constraint result;
 ## Built-in Functions
 
 ### `sum(probabilities, indices)`
+
 Sum probabilities for specified class indices:
 ```
 define high_birads_L = sum(birads_L, [4, 5, 6])
@@ -196,18 +206,21 @@ define very_high_birads = sum(birads_L, [5, 6])
 ```
 
 ### `exactly_one(probabilities)`
+
 Create exactly-one constraint for categorical probabilities:
 ```
 constraint exactly_one(birads_L) weight=1.0
 ```
 
 ### `mutual_exclusion(...probabilities)`
+
 Create mutual exclusion constraint between multiple probabilities:
 ```
 constraint mutual_exclusion(mass_L, mc_L) weight=0.5
 ```
 
 ### `at_least_k(probabilities, k)`
+
 Create constraint that at least k elements must be true:
 ```
 define min_two_findings = at_least_k(findings_combined, 2)
@@ -215,6 +228,7 @@ constraint min_two_findings weight=0.6
 ```
 
 ### `at_most_k(probabilities, k)`
+
 Create constraint that at most k elements can be true:
 ```
 define max_one_high_birads = at_most_k(high_birads_indicators, 1)
@@ -222,6 +236,7 @@ constraint max_one_high_birads weight=0.7
 ```
 
 ### `exactly_k(probabilities, k)`
+
 Create constraint that exactly k elements must be true:
 ```
 define exactly_two_radiologists = exactly_k(radiologist_agreement, 2)
@@ -229,6 +244,7 @@ constraint exactly_two_radiologists weight=0.8
 ```
 
 ### `threshold_implication(antecedent, consequent, threshold)`
+
 Create threshold-based implication constraint:
 ```
 define strong_implication = threshold_implication(high_risk_L, findings_L, 0.7)
@@ -236,6 +252,7 @@ constraint strong_implication weight=0.9
 ```
 
 ### `conditional_probability(condition, event, target_prob)`
+
 Create conditional probability constraint:
 ```
 define conditional_findings = conditional_probability(high_birads_L, findings_L, 0.85)
@@ -243,36 +260,42 @@ constraint conditional_findings weight=0.8
 ```
 
 ### `clamp(tensor, min_val, max_val)`
+
 Clamp tensor values to specified range:
 ```
 define clamped_mass = clamp(mass_L, 0.1, 0.9)
 ```
 
 ### `threshold(tensor, threshold)`
+
 Apply threshold to tensor:
 ```
 define binary_mass = threshold(mass_L, 0.5)
 ```
 
 ### `greater_than(left, right)`
+
 Create soft greater than comparison between two tensors:
 ```
 define high_confidence = greater_than(confidence, baseline)
 ```
 
 ### `less_than(left, right)`
+
 Create soft less than comparison between two tensors:
 ```
 define low_risk = less_than(risk_score, threshold_low)
 ```
 
 ### `equals(left, right)`
+
 Create soft equality comparison between two tensors:
 ```
 define similar_scores = equals(score_a, score_b)
 ```
 
 ### `threshold_constraint(tensor, threshold, operator)`
+
 Create threshold constraint with specified comparison operator:
 ```
 define high_birads = threshold_constraint(birads_score, 0.7, ">")
@@ -283,6 +306,7 @@ define within_bounds = threshold_constraint(value, 0.3, ">=")
 ## Data Types
 
 ### Numbers
+
 Integer or floating-point numbers can be used directly in expressions:
 ```
 define high_risk = risk_score > 0.8
@@ -291,6 +315,7 @@ constraint threshold_check weight=1.5  # Literal number as parameter
 ```
 
 ### Strings
+
 Text values enclosed in quotes:
 ```
 transform="logbarrier"
@@ -299,6 +324,7 @@ const model_type = "transformer"
 ```
 
 ### Lists
+
 Arrays of values:
 ```
 [1, 2, 3]
@@ -307,6 +333,7 @@ const important_classes = [4, 5, 6]  # Can store list constants
 ```
 
 ### Mixed Type Expressions
+
 The rule language automatically handles mixed types in expressions:
 ```
 # Tensor compared with literal number
@@ -325,12 +352,14 @@ define in_range = (values >= low_cut) & (values <= high_cut)
 ## Constraint Parameters
 
 ### `weight` (float)
+
 Relative importance of the constraint:
 ```
 constraint exactly_one(birads_L) weight=2.0  # Higher weight = more important
 ```
 
 ### `transform` (string)
+
 Loss transformation method:
 - `"logbarrier"`: Logarithmic barrier (default, smooth penalties)
 - `"hinge"`: Hinge loss (softer penalties)
@@ -341,6 +370,7 @@ constraint findings >> high_birads transform="hinge"
 ```
 
 ### Custom Parameters
+
 Additional parameters specific to constraint types:
 ```
 constraint exactly_one(birads_L) weight=1.0 alpha=2.0 beta=0.5
@@ -418,6 +448,7 @@ constraint balanced_assessment weight=0.4 transform="hinge"
 ## Usage Patterns
 
 ### 1. Variable Expectations
+
 Declare required variables at the beginning of scripts for better error handling:
 ```
 # Declare all expected model outputs in one line
@@ -429,6 +460,7 @@ constraint exactly_one(left_birads)
 ```
 
 ### 2. Categorical Constraints
+
 Ensure exactly one category is selected:
 ```
 constraint exactly_one(birads_L) weight=1.0
@@ -436,6 +468,7 @@ constraint exactly_one(composition) weight=0.8
 ```
 
 ### 2. Implication Rules
+
 Model domain knowledge as if-then relationships:
 ```
 # If findings present, then high BI-RADS likely
@@ -446,12 +479,14 @@ constraint very_high_birads_L >> findings_L weight=0.8
 ```
 
 ### 3. Mutual Exclusion
+
 Prevent conflicting classifications:
 ```
 constraint mutual_exclusion(mass_L, calc_L) weight=0.5
 ```
 
 ### 4. Threshold Rules
+
 Apply domain-specific thresholds:
 ```
 define suspicious = threshold(combined_score, 0.7)
@@ -459,6 +494,7 @@ constraint suspicious >> high_birads weight=0.6
 ```
 
 ### 5. Comparison Constraints
+
 Use soft comparison operators for ordinal and threshold relationships:
 ```
 # Risk stratification with thresholds
@@ -468,6 +504,7 @@ constraint high_risk >> findings weight=0.7
 ```
 
 ### 6. Consensus and Agreement (AND_n)
+
 Model situations where all elements must be true:
 ```
 # All radiologists must agree for high confidence
@@ -480,6 +517,7 @@ constraint multi_modal_positive >> high_confidence weight=0.8
 ```
 
 ### 7. Any Evidence Detection (OR_n)
+
 Model situations where any element being true is significant:
 ```
 # Any radiologist expressing concern triggers review
@@ -492,6 +530,7 @@ constraint any_positive >> potential_pathology weight=0.7
 ```
 
 ### 8. Tensor Indexing and Slicing
+
 Access specific elements, patients, or subsets of multi-dimensional data:
 ```
 # Patient-specific analysis
@@ -529,6 +568,7 @@ constraint valid_range weight=1.0
 ```
 
 ### 9. Ordinal Relationships
+
 Model ordered classifications with comparison operators:
 ```
 # BI-RADS ordering constraints
@@ -542,21 +582,25 @@ constraint birads_3_higher & birads_4_higher weight=0.8
 The rule language provides helpful error messages for common issues:
 
 ### Syntax Errors
+
 ```
 define x = mass_L |  # Error: Missing right operand
 ```
 
 ### Undefined Variables
+
 ```
 define x = undefined_var  # Error: Variable 'undefined_var' is not defined
 ```
 
 ### Type Mismatches
+
 ```
 constraint exactly_one(5)  # Error: Expected Truth object, got number
 ```
 
 ### Invalid Functions
+
 ```
 define x = unknown_func()  # Error: Unknown function 'unknown_func'
 ```
@@ -564,6 +608,7 @@ define x = unknown_func()  # Error: Unknown function 'unknown_func'
 ## Advanced Features
 
 ### Custom Functions
+
 Add domain-specific functions to the interpreter:
 ```python
 def custom_risk_score(mass_prob, calc_prob, birads_prob):
@@ -574,12 +619,14 @@ interpreter.add_builtin_function('risk_score', custom_risk_score)
 ```
 
 ### Dynamic Rule Updates
+
 Modify rules at runtime:
 ```python
 loss_fn.update_rules(new_rules_string)
 ```
 
 ### Multiple Semantics
+
 Choose different logical semantics:
 - **Gödel**: min/max operations (sharp decisions)
 - **Łukasiewicz**: bounded sum operations (smoother)

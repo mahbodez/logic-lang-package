@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logic-lang"
-version = "0.1.0"
+version = "0.1.1"
 authors = [{ name = "Mahbod Issaiy", email = "mahbodissaiy2@gmail.com" }]
-description = "A domain-specific language for defining soft logic constraints in medical imaging"
+description = "A domain-specific language for defining soft logic constraints in medical/general domains"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
@@ -39,10 +39,10 @@ dependencies = ["torch>=1.9.0", "numpy>=1.20.0"]
 dev = ["pytest>=6.0", "pytest-cov", "black", "flake8", "mypy"]
 
 [project.urls]
-Homepage = "https://github.com/mahbodez/logic-lang"
-Documentation = "https://github.com/mahbodez/logic-lang#readme"
-Repository = "https://github.com/mahbodez/logic-lang.git"
-"Bug Tracker" = "https://github.com/mahbodez/logic-lang/issues"
+Homepage = "https://github.com/mahbodez/logic-lang-package"
+Documentation = "https://github.com/mahbodez/logic-lang-package#readme"
+Repository = "https://github.com/mahbodez/logic-lang-package.git"
+"Bug Tracker" = "https://github.com/mahbodez/logic-lang-package/issues"
 
 [tool.setuptools]
 packages = ["logic_lang"]
