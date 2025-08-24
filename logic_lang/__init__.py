@@ -43,12 +43,13 @@ from .interpreter import RuleInterpreter
 from .ast_nodes import *
 from .exceptions import *
 from .soft_logic import *
-from .loss import RuleMammoLoss
+from .loss import RuleMammoLoss, RuleBasedConstraintsLoss
 
 __all__ = [
     "RuleParser",
     "RuleInterpreter",
     "RuleMammoLoss",
+    "RuleBasedConstraintsLoss",
     "RuleLanguageError",
     "ParseError",
     "InterpreterError",

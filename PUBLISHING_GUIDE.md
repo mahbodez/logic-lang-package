@@ -31,7 +31,7 @@ logic-lang-package/
 ## Package Information
 
 - **Name**: `logic-lang` (PyPI name, installed as `logic_lang`)
-- **Version**: 0.1.0
+- **Version**: 0.1.2
 - **License**: MIT
 - **Dependencies**: PyTorch >= 1.9.0, NumPy >= 1.20.0
 - **Python**: >= 3.8

@@ -548,3 +548,6 @@ constraint exactly_one(comp) weight=1.0 transform="logbarrier"
 constraint findings_L >> high_birads_L weight=1.0 transform="logbarrier"
 constraint findings_R >> high_birads_R weight=1.0 transform="logbarrier"
 """
+
+
+RuleBasedConstraintsLoss = RuleMammoLoss
