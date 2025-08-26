@@ -1332,77 +1332,88 @@ if __name__ == "__main__":
     logits = torch.randn(batch_size, num_classes)
     probs = torch.softmax(logits, dim=-1)
 
-    # Create exactly-one constraint
-    constraint = exactly_one(probs, semantics=GodelSemantics())
     print(f"Probabilities:\n{probs}")
-    print(f"Exactly-one satisfaction: {constraint.value.squeeze()}")
+    # Create exactly-one constraint
+    for sem in [GodelSemantics(), LukasiewiczSemantics(), ProductSemantics()]:
+        print(f"\nUsing semantics: {sem.__class__.__name__}")
+        constraint = exactly_one(probs, semantics=sem)
+        print(f"Exactly-one satisfaction: {constraint.value.squeeze()}")
 
     # 2. Implication constraint example
     print("\n=== Implication Constraint Example ===")
     findings = torch.rand(batch_size, 1)  # Findings probability
     high_risk = torch.rand(batch_size, 1)  # High risk assessment
-
-    # Create implication: if findings, then high risk
-    implication = Truth(findings, GodelSemantics()) >> Truth(
-        high_risk, GodelSemantics()
-    )
     print(f"Findings: {findings.squeeze()}")
     print(f"High risk: {high_risk.squeeze()}")
-    print(f"Implication satisfaction: {implication.value.squeeze()}")
+    for sem in [GodelSemantics(), LukasiewiczSemantics(), ProductSemantics()]:
+        print(f"\nUsing semantics: {sem.__class__.__name__}")
+        findings_truth = Truth(findings, sem)
+        high_risk_truth = Truth(high_risk, sem)
+
+        implication = findings_truth >> high_risk_truth
+        print(f"Implication satisfaction: {implication.value.squeeze()}")
 
     # 3. Mutual exclusion example
     print("\n=== Mutual Exclusion Example ===")
     mass = torch.rand(batch_size, 1)
     calcification = torch.rand(batch_size, 1)
-
-    exclusion = mutual_exclusion(mass, calcification, semantics=GodelSemantics())
     print(f"Mass: {mass.squeeze()}")
     print(f"Calcification: {calcification.squeeze()}")
-    print(f"Mutual exclusion satisfaction: {exclusion.value.squeeze()}")
+    for sem in [GodelSemantics(), LukasiewiczSemantics(), ProductSemantics()]:
+        print(f"\nUsing semantics: {sem.__class__.__name__}")
+
+        exclusion = mutual_exclusion(mass, calcification, semantics=sem)
+        print(f"Mutual exclusion satisfaction: {exclusion.value.squeeze()}")
 
     # 4. Threshold implication example
     print("\n=== Threshold Implication Example ===")
     feature_strength = torch.tensor([0.3, 0.7, 0.9, 0.1]).unsqueeze(-1)
     assessment = torch.rand(batch_size, 1)
-
-    threshold_impl = threshold_implication(feature_strength, assessment, threshold=0.5)
     print(f"Feature strength: {feature_strength.squeeze()}")
     print(f"Assessment: {assessment.squeeze()}")
-    print(f"Threshold implication satisfaction: {threshold_impl.value.squeeze()}")
+    for sem in [GodelSemantics(), LukasiewiczSemantics(), ProductSemantics()]:
+        print(f"\nUsing semantics: {sem.__class__.__name__}")
+        threshold_impl = threshold_implication(
+            feature_strength, assessment, threshold=0.5, semantics=sem
+        )
+        print(f"Threshold implication satisfaction: {threshold_impl.value.squeeze()}")
 
     # 5. Constraint set with mixed constraints
     print("\n=== Constraint Set Example ===")
-    constraints = [
-        exactly_one_constraint(probs, weight=1.0),
-        implication_constraint(findings, high_risk, weight=0.7),
-        mutual_exclusion_constraint(mass, calcification, weight=0.5),
-    ]
+    for sem in [GodelSemantics(), LukasiewiczSemantics(), ProductSemantics()]:
+        print(f"\nUsing semantics: {sem.__class__.__name__}")
+        constraints = [
+            exactly_one_constraint(probs, weight=1.0, semantics=sem),
+            implication_constraint(findings, high_risk, weight=0.7, semantics=sem),
+            mutual_exclusion_constraint(mass, calcification, weight=0.5, semantics=sem),
+        ]
 
-    constraint_set = ConstraintSet(constraints)
-    total_loss = constraint_set.loss(mode="sum")
-    cvar_loss = constraint_set.loss(mode="cvar", beta=0.5)
+        constraint_set_godel = ConstraintSet(constraints)
+        total_loss = constraint_set_godel.loss(mode="sum")
+        cvar_loss = constraint_set_godel.loss(mode="cvar", beta=0.5)
 
-    print(f"Total constraint loss (sum): {total_loss.item():.4f}")
-    print(f"CVaR constraint loss (β=0.5): {cvar_loss.item():.4f}")
+        print(f"Total constraint loss (sum): {total_loss.item():.4f}")
+        print(f"CVaR constraint loss (β=0.5): {cvar_loss.item():.4f}")
 
     # 6. Comparison operators example
     print("\n=== Comparison Operators Example ===")
     values_a = torch.tensor([0.2, 0.5, 0.8, 0.9]).unsqueeze(-1)
     values_b = torch.tensor([0.5, 0.5, 0.3, 0.7]).unsqueeze(-1)
 
-    sem = GodelSemantics(sharpness=10.0)
-    truth_a = Truth(values_a, sem)
-    truth_b = Truth(values_b, sem)
-
-    gt_result = truth_a > truth_b
-    lt_result = truth_a < truth_b
-    eq_result = truth_a.eq(truth_b)
-
     print(f"Values A: {values_a.squeeze()}")
     print(f"Values B: {values_b.squeeze()}")
-    print(f"A > B satisfaction: {gt_result.value.squeeze()}")
-    print(f"A < B satisfaction: {lt_result.value.squeeze()}")
-    print(f"A == B satisfaction: {eq_result.value.squeeze()}")
+    for sem in [ProductSemantics(), LukasiewiczSemantics(), GodelSemantics()]:
+        print(f"\nUsing semantics: {sem.__class__.__name__}")
+        truth_a = Truth(values_a, sem)
+        truth_b = Truth(values_b, sem)
+
+        gt_result = truth_a > truth_b
+        lt_result = truth_a < truth_b
+        eq_result = truth_a.eq(truth_b)
+
+        print(f"A > B satisfaction: {gt_result.value.squeeze()}")
+        print(f"A < B satisfaction: {lt_result.value.squeeze()}")
+        print(f"A == B satisfaction: {eq_result.value.squeeze()}")
 
     # 7. Ordinal constraint example
     print("\n=== Ordinal Constraint Example ===")
@@ -1410,36 +1421,30 @@ if __name__ == "__main__":
     birads_logits = torch.randn(batch_size, 5)  # 5 BI-RADS classes (0-4)
     birads_probs = torch.softmax(birads_logits, dim=-1)
     cum_birads = torch.cumsum(birads_probs, dim=-1)
-
-    ordinal_constraint_obj = ordinal_constraint(cum_birads, semantics=sem)
     print(f"Cumulative BI-RADS probabilities:\n{cum_birads}")
-    print(
-        f"Ordinal constraint satisfaction: {ordinal_constraint_obj.truth.value.mean().item():.4f}"
-    )
+    for sem in [ProductSemantics(), LukasiewiczSemantics(), GodelSemantics()]:
+        print(f"\nUsing semantics: {sem.__class__.__name__}")
+        ordinal_constraint_obj = ordinal_constraint(cum_birads, semantics=sem)
+        print(
+            f"Ordinal constraint satisfaction: {ordinal_constraint_obj.truth.value.mean().item():.4f}"
+        )
 
     # 8. Threshold-based comparison constraint
     print("\n=== Threshold-based Constraint Example ===")
     findings_strength = torch.rand(batch_size, 1)
     threshold = torch.full_like(findings_strength, 0.6)
-
-    # Create constraint: findings > threshold
-    threshold_constraint = comparison_constraint(
-        findings_strength, threshold, "gt", semantics=sem, weight=1.0
-    )
-
     print(f"Findings strength: {findings_strength.squeeze()}")
     print(f"Threshold (0.6): {threshold.squeeze()}")
-    print(
-        f"Findings > threshold satisfaction: {threshold_constraint.truth.value.squeeze()}"
-    )
+    for sem in [ProductSemantics(), LukasiewiczSemantics(), GodelSemantics()]:
+        print(f"\nUsing semantics: {sem.__class__.__name__}")
 
-    print("\n=== Extension Complete ===")
-    print("Added comparison operators to soft logic:")
-    print("- GT (>): Differentiable greater than")
-    print("- LT (<): Differentiable less than")
-    print("- EQ (==/.eq()): Differentiable equality")
-    print("- Implemented in all semantic families (Product, Lukasiewicz, Godel)")
-    print("- Added operator overloading to Truth class")
-    print("- Added convenience constraint creators")
-    print("- Added ordinal constraints for ordered classifications")
-    print("- All operators are fully differentiable and broadcasting-compatible")
+        # Create constraint: findings > threshold
+        threshold_constraint = comparison_constraint(
+            findings_strength, threshold, "gt", semantics=sem, weight=1.0
+        )
+
+        print(
+            f"Findings > threshold satisfaction: {threshold_constraint.truth.value.squeeze()}"
+        )
+
+    print("\n=== Test Complete ===")
