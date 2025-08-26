@@ -22,7 +22,7 @@ Example usage (see bottom `__main__`).
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -34,48 +34,6 @@ Tensor = torch.Tensor
 # -------------------------------------------------------------
 
 
-def _broadcast_for_stack(a: Tensor, b: Tensor) -> Tuple[Tensor, Tensor]:
-    """
-    Make two tensors compatible for torch.stack by expanding to the same shape.
-
-    This is specifically for Gödel semantics which uses torch.stack.
-    Uses PyTorch's broadcast_tensors to handle the heavy lifting.
-
-    Args:
-        a, b: Input tensors that may have different shapes
-
-    Returns:
-        Tuple of tensors with identical shapes
-    """
-    if a.shape == b.shape:
-        return a, b
-
-    # Use PyTorch's built-in broadcasting
-    try:
-        a_broadcast, b_broadcast = torch.broadcast_tensors(a, b)
-        return a_broadcast, b_broadcast
-    except RuntimeError as e:
-        # If broadcasting fails, try to make them compatible manually
-        # This handles the case where feature dimensions are different
-        max_dims = max(a.dim(), b.dim())
-
-        # Add dimensions to the left (except batch dimension)
-        while a.dim() < max_dims:
-            a = a.unsqueeze(1)
-        while b.dim() < max_dims:
-            b = b.unsqueeze(1)
-
-        # Try broadcasting again
-        try:
-            a_broadcast, b_broadcast = torch.broadcast_tensors(a, b)
-            return a_broadcast, b_broadcast
-        except RuntimeError:
-            raise RuntimeError(
-                f"Cannot broadcast tensors with shapes {a.shape} and {b.shape} for stack operation. "
-                f"Original error: {e}"
-            )
-
-
 def _clamp01(tensor: Tensor, eps: float = 1e-7) -> Tensor:
     """Clamp probabilities to (0,1) open interval for numerical stability."""
     return tensor.clamp(min=eps, max=1.0 - eps)
@@ -85,7 +43,10 @@ def _softplus(x: Tensor, beta: float = 1.0) -> Tensor:
     """Stable softplus with tunable beta: softplus(beta*x)/beta."""
     if beta == 1.0:
         return F.softplus(x)
-    return F.softplus(beta * x) / beta
+    elif beta <= 0.0:
+        raise ValueError("beta must strictly be positive")
+    else:
+        return F.softplus(beta * x) / beta
 
 
 # -------------------------------------------------------------
@@ -147,7 +108,7 @@ class Semantics:
 
 
 class ProductSemantics(Semantics):
-    """Product logic: smooth, everywhere differentiable."""
+    """Product logic: smooth, stable, everywhere differentiable."""
 
     def __init__(self, eps: float = 1e-6, sharpness: float = 8.0):
         super().__init__(eps=eps)
@@ -157,17 +118,47 @@ class ProductSemantics(Semantics):
         return 1.0 - a
 
     def AND(self, a: Tensor, b: Tensor) -> Tensor:
-        return a * b
+        return _clamp01(
+            torch.exp(
+                torch.log(_clamp01(a, self.eps)) + torch.log(_clamp01(b, self.eps))
+            ),
+            self.eps,
+        )
+
+    def AND_n(self, xs: Sequence[Tensor]) -> Tensor:
+        # Numerically stable probabilistic AND in log-space
+        if not xs:
+            raise ValueError("AND_n requires at least one operand")
+        if len(xs) == 1:  # single element, no need to stack
+            return xs[0]
+        xs = torch.broadcast_tensors(*xs)
+        x = torch.stack(xs, dim=0)
+        return _clamp01(
+            torch.exp(torch.sum(torch.log(_clamp01(x, self.eps)), dim=0)), self.eps
+        )
 
     def OR(self, a: Tensor, b: Tensor) -> Tensor:
-        return a + b - a * b
+        return _clamp01(a + b - self.AND(a, b), self.eps)
+
+    def OR_n(self, xs: Sequence[Tensor]) -> Tensor:
+        # Numerically stable probabilistic OR in log-space
+        if not xs:
+            raise ValueError("OR_n requires at least one operand")
+        if len(xs) == 1:  # single element, no need to stack
+            return xs[0]
+        xs = torch.broadcast_tensors(*xs)
+        x = torch.stack(xs, dim=0)
+        return _clamp01(
+            1.0 - torch.exp(torch.sum(torch.log(_clamp01(1.0 - x, self.eps)), dim=0)),
+            self.eps,
+        )
 
     def IMPLIES(self, a: Tensor, b: Tensor) -> Tensor:
         # 1 - a + a*b
-        return 1.0 - a + a * b
+        return _clamp01(1.0 - a + self.AND(a, b), self.eps)
 
     def XOR(self, a: Tensor, b: Tensor) -> Tensor:
-        return a + b - 2.0 * a * b
+        return _clamp01(a + b - 2.0 * self.AND(a, b), self.eps)
 
     def GT(self, a: Tensor, b: Tensor) -> Tensor:
         # Smooth greater than using sigmoid: high when a > b
@@ -185,7 +176,7 @@ class ProductSemantics(Semantics):
 
 
 class LukasiewiczSemantics(Semantics):
-    """Smooth Łukasiewicz logic using softplus to avoid kinks.
+    """Smooth Łukasiewicz logic.
 
     AND(a,b) = max(a + b - 1, 0)
     OR(a,b)  = min(a + b, 1)
@@ -194,11 +185,8 @@ class LukasiewiczSemantics(Semantics):
     softness controls transition sharpness; larger -> closer to hard piecewise.
     """
 
-    def __init__(
-        self, eps: float = 1e-6, softness: float = 8.0, sharpness: float = 8.0
-    ):
+    def __init__(self, eps: float = 1e-6, sharpness: float = 8.0, **kwargs):
         super().__init__(eps=eps)
-        self.softness = softness
         self.sharpness = sharpness  # For comparison operators
 
     def NOT(self, a: Tensor) -> Tensor:
@@ -206,22 +194,40 @@ class LukasiewiczSemantics(Semantics):
 
     def AND(self, a: Tensor, b: Tensor) -> Tensor:
         # max(a + b - 1, 0) - exact Lukasiewicz t-norm
-        return _clamp01(torch.clamp(a + b - 1.0, min=0.0), self.eps)
+        return _clamp01(a + b - 1.0, self.eps)
+
+    def AND_n(self, xs: Sequence[Tensor]) -> Tensor:
+        if not xs:
+            raise ValueError("AND_n requires at least one operand")
+        if len(xs) == 1:  # single element, no need to stack
+            return xs[0]
+        xs = torch.broadcast_tensors(*xs)
+        x = torch.stack(xs, dim=0)
+        return _clamp01(torch.min(x, dim=0).values, self.eps)
 
     def OR(self, a: Tensor, b: Tensor) -> Tensor:
         # min(a + b, 1) - exact Lukasiewicz t-conorm
-        return _clamp01(torch.clamp(a + b, max=1.0), self.eps)
+        return _clamp01(a + b, self.eps)
+
+    def OR_n(self, xs: Sequence[Tensor]) -> Tensor:
+        if not xs:
+            raise ValueError("OR_n requires at least one operand")
+        if len(xs) == 1:  # single element, no need to stack
+            return xs[0]
+        xs = torch.broadcast_tensors(*xs)
+        x = torch.stack(xs, dim=0)
+        return _clamp01(torch.sum(x, dim=0), self.eps)
 
     def IMPLIES(self, a: Tensor, b: Tensor) -> Tensor:
         # min(1, 1 - a + b) - exact Lukasiewicz implication
-        return _clamp01(torch.clamp(1.0 - a + b, max=1.0), self.eps)
+        return _clamp01(1.0 - a + b, self.eps)
 
     def GT(self, a: Tensor, b: Tensor) -> Tensor:
         # Lukasiewicz-style greater than: max(a - b, 0) scaled and shifted
         # Scale to [0,1] and apply smooth transition
         diff = a - b
         # Smooth version of max(diff, 0) using softplus
-        smooth_max = _softplus(self.sharpness * diff) / self.sharpness
+        smooth_max = _softplus(diff, self.sharpness)
         # Sigmoid to map to [0,1] probabilities
         return torch.sigmoid(self.sharpness * smooth_max)
 
@@ -234,7 +240,7 @@ class LukasiewiczSemantics(Semantics):
         # This maintains the bounded linear characteristic of Lukasiewicz logic
         diff = torch.abs(a - b)
         equality = 1.0 - diff
-        return _clamp01(torch.clamp(equality, min=0.0), self.eps)
+        return _clamp01(equality, self.eps)
 
 
 class GodelSemantics(Semantics):
@@ -248,10 +254,10 @@ class GodelSemantics(Semantics):
     def NOT(self, a: Tensor) -> Tensor:
         return 1.0 - a
 
-    def AND(self, a: Tensor, b: Tensor) -> Tensor:
+    def AND(self, a: Tensor, b: Tensor) -> Tensor:  # Soft min via log-sum-exp
         # For identical tensors, use a numerically stable computation
         # that preserves idempotence while maintaining differentiability
-        a_broadcast, b_broadcast = _broadcast_for_stack(a, b)
+        a_broadcast, b_broadcast = torch.broadcast_tensors(a, b)
 
         if torch.equal(a_broadcast, b_broadcast):
             # When inputs are identical, softmin(x,x) should equal x
@@ -263,16 +269,25 @@ class GodelSemantics(Semantics):
             correction = (
                 torch.log(torch.tensor(2.0, device=a.device, dtype=a.dtype)) / self.tau
             )
-            return uncorrected + correction
+            return _clamp01(uncorrected + correction, self.eps)
         else:
             # Normal case for different inputs
             x = torch.stack([a_broadcast, b_broadcast], dim=0)
-            return -torch.logsumexp(-self.tau * x, dim=0) / self.tau
+            return _clamp01(-torch.logsumexp(-self.tau * x, dim=0) / self.tau, self.eps)
 
-    def OR(self, a: Tensor, b: Tensor) -> Tensor:
+    def AND_n(self, xs: Sequence[Tensor]) -> Tensor:
+        if not xs:
+            raise ValueError("AND_n requires at least one operand")
+        if len(xs) == 1:  # single element, no need to stack
+            return xs[0]
+        xs = torch.broadcast_tensors(*xs)
+        x = torch.stack(xs, dim=0)
+        return _clamp01(-torch.logsumexp(-self.tau * x, dim=0) / self.tau, self.eps)
+
+    def OR(self, a: Tensor, b: Tensor) -> Tensor:  # Soft max via log-sum-exp
         # For identical tensors, use a numerically stable computation
         # that preserves idempotence while maintaining differentiability
-        a_broadcast, b_broadcast = _broadcast_for_stack(a, b)
+        a_broadcast, b_broadcast = torch.broadcast_tensors(a, b)
 
         if torch.equal(a_broadcast, b_broadcast):
             # When inputs are identical, softmax(x,x) should equal x
@@ -284,15 +299,24 @@ class GodelSemantics(Semantics):
             correction = (
                 torch.log(torch.tensor(2.0, device=a.device, dtype=a.dtype)) / self.tau
             )
-            return uncorrected - correction
+            return _clamp01(uncorrected - correction, self.eps)
         else:
             # Normal case for different inputs
             x = torch.stack([a_broadcast, b_broadcast], dim=0)
-            return torch.logsumexp(self.tau * x, dim=0) / self.tau
+            return _clamp01(torch.logsumexp(self.tau * x, dim=0) / self.tau, self.eps)
+
+    def OR_n(self, xs: Sequence[Tensor]) -> Tensor:  # Soft max via log-sum-exp
+        if not xs:
+            raise ValueError("OR_n requires at least one operand")
+        if len(xs) == 1:  # single element, no need to stack
+            return xs[0]
+        xs = torch.broadcast_tensors(*xs)
+        x = torch.stack(xs, dim=0)
+        return _clamp01(torch.logsumexp(self.tau * x, dim=0) / self.tau, self.eps)
 
     def IMPLIES(self, a: Tensor, b: Tensor) -> Tensor:
         # use default (¬a ∨ b) to inherit softmax OR
-        return super().IMPLIES(a, b)
+        return _clamp01(super().IMPLIES(a, b), self.eps)
 
     def GT(self, a: Tensor, b: Tensor) -> Tensor:
         # Gödel-style greater than using smooth approximation
@@ -339,8 +363,8 @@ class Truth:
         name: Optional[str] = None,
     ):
         assert isinstance(value, torch.Tensor)
-        self.value = value
         self.semantics = semantics or ProductSemantics()
+        self.value = _clamp01(value, eps=self.semantics.eps)
         self.name = name
 
     def clone(self) -> "Truth":
@@ -1219,6 +1243,7 @@ def comparison_constraint(
 def ordinal_constraint(
     probabilities: Union[Tensor, Truth],
     semantics: Optional[Semantics] = None,
+    apply_cumsum: bool = False,
     eps: float = 1e-6,
     weight: float = 1.0,
     transform: str = "logbarrier",
@@ -1232,6 +1257,7 @@ def ordinal_constraint(
     Args:
         probabilities: Cumulative probabilities tensor or Truth object of shape (..., K)
         semantics: Logic semantics
+        apply_cumsum: Whether to apply cumulative sum to probabilities
         eps: Numerical stability epsilon
         weight: Constraint weight
         transform: Loss transform
@@ -1244,8 +1270,7 @@ def ordinal_constraint(
         >>> # For BI-RADS classification: P(≤3) ≥ P(≤2) ≥ P(≤1) ≥ P(≤0)
         >>> logits = torch.randn(32, 5)  # 5 BI-RADS classes
         >>> probs = torch.softmax(logits, dim=-1)
-        >>> cum_probs = torch.cumsum(probs, dim=-1)
-        >>> constraint = ordinal_constraint(cum_probs)
+        >>> constraint = ordinal_constraint(probs, apply_cumsum=True)
     """
     sem = semantics or ProductSemantics(eps=eps)
 
@@ -1254,6 +1279,10 @@ def ordinal_constraint(
         sem = probabilities.semantics
     else:
         P = _clamp01(probabilities, eps=eps)
+
+    if apply_cumsum:
+        P = torch.cumsum(P, dim=-1)
+        P = _clamp01(P, eps=eps)
 
     K = P.size(-1)
     if K < 2:
