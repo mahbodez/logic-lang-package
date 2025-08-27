@@ -5,7 +5,25 @@ Implements a recursive descent parser that converts logic scripts into AST.
 The grammar supports:
 - Variable expectations: expect var1, var2, var3
 - Variable definitions: define var_name = expression
-- Constraints: constraint expression [weight=value] [transform="type"]
+-        while not self._at_end() and self._peek().type in [
+            "WEIGHT",
+            "TRANSFORM",
+            "IDENTIFIER",
+        ]:
+            if self._peek().type == "WEIGHT":
+                self._consume("WEIGHT")
+                self._consume("EQUALS")
+                weight = self._parse_unary()  # Changed to support negative weights
+            elif self._peek().type == "TRANSFORM":
+                self._consume("TRANSFORM")
+                self._consume("EQUALS")
+                transform = self._parse_primary()  # Transform is always a string
+            else:
+                # Custom parameter
+                param_name = self._consume("IDENTIFIER").value
+                self._consume("EQUALS")
+                param_value = self._parse_unary()  # Changed to support negative values
+                params[param_name] = param_valueraint expression [weight=value] [transform="type"]
 - Expressions: logical operations (|, &, ~, >>), function calls, literals
 - Comments: # comment text
 """
@@ -42,7 +60,7 @@ class Lexer:
         ("WEIGHT", r"\bweight\b"),
         ("TRANSFORM", r"\btransform\b"),
         ("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*"),
-        ("NUMBER", r"\d+\.?\d*"),
+        ("NUMBER", r"\d+\.?\d*([eE][+-]?\d+)?"),
         ("STRING", r'"[^"]*"|\'[^\']*\''),
         ("IMPLIES", r">>"),
         ("EQ", r"=="),  # Must come before EQUALS
@@ -54,6 +72,10 @@ class Lexer:
         ("AMPERSAND", r"&"),
         ("CARET", r"\^"),
         ("TILDE", r"~"),
+        ("MINUS", r"-"),  # Minus operator (for negative numbers and subtraction)
+        ("PLUS", r"\+"),  # Plus operator (for addition)
+        ("MULTIPLY", r"\*"),  # Multiplication operator
+        ("DIVIDE", r"/"),  # Division operator
         ("EQUALS", r"="),
         ("LPAREN", r"\("),
         ("RPAREN", r"\)"),
@@ -165,20 +187,12 @@ class RuleParser:
         name_token = self._consume("IDENTIFIER")
         self._consume("EQUALS")
 
-        # Constants can only be literals (numbers, strings)
-        value_expr = self._parse_primary()
-        if isinstance(value_expr, NumberLiteral):
-            value = value_expr.value
-        elif isinstance(value_expr, StringLiteral):
-            value = value_expr.value
-        else:
-            raise ParseError(
-                f"Constants must be literal values (numbers or strings), got {type(value_expr).__name__}",
-                self._peek().line,
-                self._peek().column,
-            )
+        # Constants can be any expression that evaluates to a literal value
+        value_expr = self._parse_expression()
 
-        return ConstStatement(name=name_token.value, value=value)
+        # For now, we store the expression and let the interpreter evaluate it
+        # The interpreter will ensure it's a constant value
+        return ConstStatement(name=name_token.value, value=value_expr)
 
     def _parse_define(self) -> DefineStatement:
         """Parse variable definition."""
@@ -220,16 +234,16 @@ class RuleParser:
             if self._peek().type == "WEIGHT":
                 self._consume("WEIGHT")
                 self._consume("EQUALS")
-                weight = self._parse_primary()
+                weight = self._parse_expression()  # Changed to support expressions
             elif self._peek().type == "TRANSFORM":
                 self._consume("TRANSFORM")
                 self._consume("EQUALS")
-                transform = self._parse_primary()
+                transform = self._parse_primary()  # Transform is always a string
             else:
                 # Handle other named parameters
                 param_name = self._consume("IDENTIFIER").value
                 self._consume("EQUALS")
-                param_value = self._parse_primary()
+                param_value = self._parse_expression()  # Changed to support expressions
                 params[param_name] = param_value
 
         return ConstraintStatement(
@@ -306,10 +320,44 @@ class RuleParser:
 
     def _parse_and(self) -> Expression:
         """Parse AND operator."""
-        expr = self._parse_unary()
+        expr = self._parse_arithmetic_term()
 
         while not self._at_end() and self._peek().type == "AMPERSAND":
             op = self._consume("AMPERSAND").value
+            right = self._parse_arithmetic_term()
+            expr = BinaryOp(left=expr, operator=op, right=right)
+
+        return expr
+
+    def _parse_arithmetic_term(self) -> Expression:
+        """Parse addition and subtraction (lowest arithmetic precedence)."""
+        expr = self._parse_arithmetic_factor()
+
+        while not self._at_end() and self._peek().type in ["PLUS", "MINUS"]:
+            # Check if this is actually a binary operation (not unary)
+            if self._peek().type == "MINUS":
+                # Check if this could be a binary minus
+                # It's binary if we have a left operand and it's not at the start of an expression
+                op = self._consume("MINUS").value
+                right = self._parse_arithmetic_factor()
+                expr = BinaryOp(left=expr, operator=op, right=right)
+            elif self._peek().type == "PLUS":
+                op = self._consume("PLUS").value
+                right = self._parse_arithmetic_factor()
+                expr = BinaryOp(left=expr, operator=op, right=right)
+
+        return expr
+
+    def _parse_arithmetic_factor(self) -> Expression:
+        """Parse multiplication and division (higher arithmetic precedence)."""
+        expr = self._parse_unary()
+
+        while not self._at_end() and self._peek().type in ["MULTIPLY", "DIVIDE"]:
+            if self._peek().type == "MULTIPLY":
+                op = self._consume("MULTIPLY").value
+            elif self._peek().type == "DIVIDE":
+                op = self._consume("DIVIDE").value
+
             right = self._parse_unary()
             expr = BinaryOp(left=expr, operator=op, right=right)
 
@@ -317,14 +365,26 @@ class RuleParser:
 
     def _parse_unary(self) -> Expression:
         """Parse unary operators."""
-        if not self._at_end() and self._peek().type in ["TILDE", "AMPERSAND", "PIPE"]:
+        if not self._at_end() and self._peek().type in [
+            "TILDE",
+            "AMPERSAND",
+            "PIPE",
+            "MINUS",
+            "PLUS",
+        ]:
             op_token = self._peek()
-            if op_token.type == "TILDE":
+            if op_token.type == "TILDE":  # ~ NOT
                 op = self._consume("TILDE").value
-            elif op_token.type == "AMPERSAND":
+            elif op_token.type == "AMPERSAND":  # & AND
                 op = self._consume("AMPERSAND").value
-            elif op_token.type == "PIPE":
+            elif op_token.type == "PIPE":  # | OR
                 op = self._consume("PIPE").value
+            elif op_token.type == "MINUS":  # - NEG
+                op = self._consume("MINUS").value
+            elif op_token.type == "PLUS":  # + POS
+                op = self._consume("PLUS").value
+
+            # Recursively parse unary to handle multiple unary operators (e.g., -(-5))
             operand = self._parse_unary()
             return UnaryOp(operator=op, operand=operand)
 

@@ -31,6 +31,42 @@ script = "constraint exactly_one(predictions);" # also can load from .logic file
 constraint_set = interpreter.execute(script, features)
 ```
 
+## ⚠️ Important Cautions
+
+### Batch Dimension Handling
+
+When using the `RuleMammoLoss` or `RuleBasedConstraintsLoss` with tensor indexing in your logic scripts, **you must explicitly account for the batch dimension**:
+
+```python
+# ✅ CORRECT: Always preserve batch dimension with ':' 
+define birads_4 = features[:, 4]           # Access feature 4 for all batch items
+define classes_4to6 = features[:, 4:7]     # Access features 4-6 for all batch items
+define view_cc = assessments[:, 0, :]      # Access CC view for all batch items
+
+# ❌ WRONG: These access batch items, not features!
+define birads_4 = features[4]              # Accesses batch item 4, not feature 4!
+define classes_4to6 = features[4:7]        # Accesses batch items 4-6!
+```
+
+**Why this matters:**
+- `RuleMammoLoss`/`RuleBasedConstraintsLoss` passes tensors with shape `(batch_size, ...)` to the interpreter
+- The first dimension is always the batch dimension
+- Logic operations need to work across the entire batch
+- Incorrect indexing will cause shape mismatches and unexpected behavior
+
+### Tensor Shape Awareness
+
+Always be aware of your tensor shapes when writing logic scripts:
+
+```python
+# If your features have shape (B, 7) for 7 BI-RADS classes:
+define high_birads = features[:, 4:]       # ✅ Classes 4,5,6 for all batches
+
+# If your assessments have shape (B, 2, 3) for 2 views, 3 radiologists:
+define cc_radiologist_1 = assessments[:, 0, 1]  # ✅ CC view, radiologist 1, all batches
+define mlo_consensus = assessments[:, 1, :]      # ✅ MLO view, all radiologists, all batches
+```
+
 ## Syntax Reference
 
 ### Comments
@@ -162,20 +198,21 @@ constraint exactly_one(comp) weight=1.5 transform="hinge" alpha=2.0
 
 9. **Indexing (`variable[...]`)**: Access tensor elements using numpy/pytorch syntax
    ```
-   # Integer indexing
-   define first_patient = patient_data[0]
-   define specific_element = matrix[1, 2]
-   define last_radiologist = assessments[2]
+   # IMPORTANT: When indexing tensors from RuleMammoLoss, you MUST account for the batch dimension!
+   # Tensors have shape (batch_size, ...), so the first index is always the batch dimension
    
-   # Slice indexing
-   define first_two_patients = patient_data[:2]
-   define middle_columns = matrix[:, 1:3]
-   define every_other = data[::2]
-   define specific_range = tensor[1:4]
+   # Access specific features for all batch items (CORRECT)
+   define birads_class_4 = features[:, 4]        # All batches, class 4
+   define high_birads = features[:, 4:7]         # All batches, classes 4-6
+   define view_data = assessments[:, 1, :]       # All batches, view 1, all features
    
-   # Multi-dimensional indexing
-   define patient_features = batch_data[0, :, 2]
-   define view_subset = assessments[:, 1, :]
+   # Multi-dimensional indexing with batch preservation
+   define patient_features = batch_data[:, 0, 2] # All batches, patient 0, feature 2
+   define cc_view = assessments[:, :, 0]         # All batches, all views, radiologist 0
+   
+   # WRONG - These would try to access specific batch items instead of features:
+   # define birads_class_4 = features[4]         # Would access batch item 4!
+   # define high_birads = features[4:7]          # Would access batch items 4-6!
    ```
 
 ### Parentheses
@@ -184,6 +221,77 @@ Use parentheses to override operator precedence:
 ```
 define complex = (mass_L | mc_L) & ~(birads_L >> findings_L)
 ```
+
+### Negative Numbers
+
+Logic-lang supports negative numbers in all numeric contexts:
+
+```
+# Negative constants
+const negative_threshold = -0.5
+const offset = -10
+
+# Negative literals in expressions
+define below_zero = risk_score > -0.1
+define centered = features[:, 0] >= -1.0
+
+# Negative weights in constraints
+constraint findings_L >> high_birads weight=-0.3
+
+# Complex expressions with negative numbers
+define adjusted_score = risk_score > (-threshold + 0.1)
+define negative_range = score >= -5 & score <= -1
+```
+
+**Note:** Negative numbers work in:
+- Constant definitions (`const neg = -5`)
+- Literal values in expressions (`score > -0.5`)
+- Constraint weights (`weight=-0.3`)
+- Constraint parameters (`alpha=-2.0`)
+- Complex arithmetic expressions (`value + (-10)`)
+
+The unary minus operator has high precedence, so `-5 + 3` is parsed as `(-5) + 3 = -2`.
+
+### Arithmetic Operations
+
+Logic-lang supports basic arithmetic operations with proper precedence:
+
+```
+# Basic arithmetic in constants
+const sum_result = 5 + 3        # Addition: 8
+const diff_result = 10 - 3      # Subtraction: 7 
+const prod_result = 4 * 2       # Multiplication: 8
+const div_result = 8 / 2        # Division: 4
+
+# Complex expressions with parentheses
+const complex = (5 + 3) * 2 - 1 # Result: 15
+
+# Arithmetic with variables (tensors)
+define sum_scores = score_a + score_b
+define scaled_score = risk_score * 2.0
+define normalized = (score - min_val) / (max_val - min_val)
+
+# Mixed arithmetic and logical operations
+define high_combined = (score_a + score_b) > threshold
+define weighted_decision = prediction * weight > 0.5
+```
+
+**Operator Precedence (highest to lowest):**
+1. Parentheses `()`
+2. Unary operators `-, +, ~`
+3. Multiplication and Division `*, /`
+4. Addition and Subtraction `+, -`
+5. Comparisons `>, <, ==, >=, <=`
+6. Logical AND `&`
+7. Logical XOR `^`
+8. Logical OR `|`
+9. Implication `>>`
+
+**Type Handling:**
+- **Numbers + Numbers**: Returns number (`5 + 3 = 8`)
+- **Tensors + Tensors**: Returns tensor (`tensor([[2]]) + tensor([[3]]) = tensor([[5]])`)
+- **Numbers + Tensors**: Returns tensor (broadcasting applies)
+- **Truth + Truth**: Returns Truth object with arithmetic on underlying values
 
 ## Statement Separation
 
@@ -560,38 +668,31 @@ constraint any_positive >> potential_pathology weight=0.7
 
 Access specific elements, patients, or subsets of multi-dimensional data:
 ```
-# Patient-specific analysis
-define patient_0_risk = patient_risks[0]
-define patient_1_findings = findings[1, :]
-constraint patient_0_risk > 0.8 >> patient_0_findings weight=1.0
+# REMEMBER: First dimension is always batch! Use [:, ...] to preserve batch dimension
 
-# View-specific mammography analysis
+# Feature-wise access (CORRECT - preserves batch dimension)
+define birads_4 = features[:, 4]              # Feature 4 for all batch items
+define high_classes = features[:, 4:7]        # Features 4-6 for all batch items
+define first_half = features[:, :3]           # Features 0-2 for all batch items
+
+# Multi-dimensional indexing with batch preservation
 define cc_assessments = assessments[:, 0, :]  # CC view for all patients
-define mlo_assessments = assessments[:, 1, :]  # MLO view for all patients
-define cc_consensus = & cc_assessments
-define mlo_consensus = & mlo_assessments
+define mlo_assessments = assessments[:, 1, :] # MLO view for all patients  
+define radiologist_1 = assessments[:, :, 0]   # Radiologist 1 across all views/patients
+
+# View-specific analysis preserving batch dimension
+define cc_consensus = & cc_assessments        # Consensus across CC view features
+define mlo_consensus = & mlo_assessments      # Consensus across MLO view features
 constraint cc_consensus & mlo_consensus >> high_confidence weight=0.9
 
-# Radiologist-specific consistency
-define senior_opinions = assessments[:, :, 0]  # Senior across all views
-define resident_opinions = assessments[:, :, 1]  # Resident across all views
-define senior_consistency = & senior_opinions
-constraint senior_consistency weight=0.8
+# Feature subset analysis
+define feature_subset = features[:, 2:5]      # Specific feature range for all batches
+define subset_consensus = & feature_subset
+constraint subset_consensus >> specialized_finding weight=0.8
 
-# Subset analysis
-define high_risk_patients = patient_data[:3]  # First 3 patients
-define feature_subset = features[:, 2:5]  # Specific feature range
-define consensus_subset = & high_risk_patients
-constraint consensus_subset >> intensive_monitoring weight=1.0
-
-
-# Equality constraints for consistency
-define balanced_breasts = equals(risk_L, risk_R)
-constraint balanced_breasts weight=0.3 transform="hinge"
-
-# Range constraints using multiple comparisons
-define valid_range = (score >= 0.1) & (score <= 0.9)
-constraint valid_range weight=1.0
+# WRONG - These would access batch items instead of features:
+# define birads_4 = features[4]              # Accesses batch item 4!
+# define patient_subset = features[2:5]      # Accesses batch items 2-4!
 ```
 
 ### 9. Ordinal Relationships
@@ -630,6 +731,15 @@ constraint exactly_one(5)  # Error: Expected Truth object, got number
 
 ```
 define x = unknown_func()  # Error: Unknown function 'unknown_func'
+```
+
+### Batch Dimension Errors
+
+```
+# Wrong indexing - accessing batch items instead of features
+define birads_4 = features[4]     # Error: May cause shape mismatch
+# Correct indexing - preserving batch dimension  
+define birads_4 = features[:, 4]  # ✅ Correct: Access feature 4 for all batches
 ```
 
 ## Advanced Features
@@ -675,6 +785,9 @@ loss_fn = RuleMammoLoss(
 4. **Meaningful Names**: Use descriptive variable names that reflect medical concepts
 5. **Balanced Weights**: Start with equal weights and adjust based on domain importance
 6. **Appropriate Transforms**: Use "logbarrier" for strict constraints, "hinge" for softer ones
+7. **⚠️ Mind the Batch Dimension**: Always use `[:, ...]` when indexing tensors from `RuleMammoLoss` or `RuleBasedConstraintsLoss`
+8. **Validate Tensor Shapes**: Print tensor shapes during development to verify indexing
+9. **Test with Different Batch Sizes**: Ensure your logic works with various batch sizes
 
 ## Migration from Hard-coded Constraints
 

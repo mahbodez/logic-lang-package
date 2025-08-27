@@ -146,8 +146,21 @@ class RuleInterpreter:
             # Comments are ignored
             pass
         elif isinstance(stmt, ConstStatement):
-            # Store constant value directly
-            self.variables[stmt.name] = stmt.value
+            # Evaluate constant expression to get the value
+            if hasattr(stmt.value, "__class__") and hasattr(stmt.value, "__module__"):
+                # It's an AST expression, evaluate it
+                value = self._evaluate_expression(stmt.value)
+            else:
+                # It's already a literal value (backward compatibility)
+                value = stmt.value
+
+            # Ensure the result is a constant (number or string)
+            if not isinstance(value, (int, float, str)):
+                raise InterpreterError(
+                    f"Constants must evaluate to numbers or strings, got {type(value).__name__}"
+                )
+
+            self.variables[stmt.name] = value
         elif isinstance(stmt, DefineStatement):
             value = self._evaluate_expression(stmt.expression)
             self.variables[stmt.name] = value
@@ -246,7 +259,116 @@ class RuleInterpreter:
         left = self._evaluate_expression(expr.left)
         right = self._evaluate_expression(expr.right)
 
-        # Handle mixed types: convert numbers to tensors when needed for comparisons
+        # Handle pure numeric operations first (for constant definitions)
+        if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+            if expr.operator == ">":
+                return float(left > right)
+            elif expr.operator == "<":
+                return float(left < right)
+            elif expr.operator == "==":
+                return float(left == right)
+            elif expr.operator == ">=":
+                return float(left >= right)
+            elif expr.operator == "<=":
+                return float(left <= right)
+            elif expr.operator == "+":
+                return left + right
+            elif expr.operator == "-":
+                return left - right
+            elif expr.operator == "*":
+                return left * right
+            elif expr.operator == "/":
+                if right == 0:
+                    raise InterpreterError("Division by zero")
+                return left / right
+            else:
+                # For logical operations, convert to Truth objects
+                left = Truth(torch.tensor(float(left)), self.default_semantics)
+                right = Truth(torch.tensor(float(right)), self.default_semantics)
+
+        # Handle arithmetic operations on tensors (before converting to Truth)
+        elif expr.operator in ["+", "-", "*", "/"]:
+            # Ensure we have compatible types for arithmetic
+            if isinstance(left, (int, float)) and isinstance(right, torch.Tensor):
+                left = torch.full_like(right, float(left))
+            elif isinstance(right, (int, float)) and isinstance(left, torch.Tensor):
+                right = torch.full_like(left, float(right))
+            elif isinstance(left, Truth) and isinstance(right, torch.Tensor):
+                # Truth * Tensor operations
+                if expr.operator == "+":
+                    return Truth(left.value + right, left.semantics)
+                elif expr.operator == "-":
+                    return Truth(left.value - right, left.semantics)
+                elif expr.operator == "*":
+                    return Truth(left.value * right, left.semantics)
+                elif expr.operator == "/":
+                    if torch.any(right == 0):
+                        raise InterpreterError("Division by zero")
+                    return Truth(left.value / right, left.semantics)
+            elif isinstance(left, torch.Tensor) and isinstance(right, Truth):
+                # Tensor * Truth operations
+                if expr.operator == "+":
+                    return Truth(left + right.value, right.semantics)
+                elif expr.operator == "-":
+                    return Truth(left - right.value, right.semantics)
+                elif expr.operator == "*":
+                    return Truth(left * right.value, right.semantics)
+                elif expr.operator == "/":
+                    if torch.any(right.value == 0):
+                        raise InterpreterError("Division by zero")
+                    return Truth(left / right.value, right.semantics)
+            elif isinstance(left, (int, float)) and isinstance(right, Truth):
+                if expr.operator == "+":
+                    return Truth(left + right.value, right.semantics)
+                elif expr.operator == "-":
+                    return Truth(left - right.value, right.semantics)
+                elif expr.operator == "*":
+                    return Truth(left * right.value, right.semantics)
+                elif expr.operator == "/":
+                    # Check for division by zero in Truth objects
+                    if torch.any(right.value == 0):
+                        raise InterpreterError("Division by zero")
+                    return Truth(left / right.value, right.semantics)
+            elif isinstance(right, (int, float)) and isinstance(left, Truth):
+                if expr.operator == "+":
+                    return Truth(left.value + right, left.semantics)
+                elif expr.operator == "-":
+                    return Truth(left.value - right, left.semantics)
+                elif expr.operator == "*":
+                    return Truth(left.value * right, left.semantics)
+                elif expr.operator == "/":
+                    if right == 0:
+                        raise InterpreterError("Division by zero")
+                    return Truth(left.value / right, left.semantics)
+            elif isinstance(left, Truth) and isinstance(right, Truth):
+                if expr.operator == "+":
+                    return Truth(left.value + right.value, left.semantics)
+                elif expr.operator == "-":
+                    return Truth(left.value - right.value, left.semantics)
+                elif expr.operator == "*":
+                    return Truth(left.value * right.value, left.semantics)
+                elif expr.operator == "/":
+                    # Check for division by zero in Truth objects
+                    if torch.any(right.value == 0):
+                        raise InterpreterError("Division by zero")
+                    return Truth(left.value / right.value, left.semantics)
+
+            # Pure tensor arithmetic - return tensor, not Truth
+            if isinstance(left, torch.Tensor) and isinstance(right, torch.Tensor):
+                if expr.operator == "+":
+                    return left + right
+                elif expr.operator == "-":
+                    return left - right
+                elif expr.operator == "*":
+                    return left * right
+                elif expr.operator == "/":
+                    # Check for division by zero in tensors
+                    if torch.any(right == 0):
+                        raise InterpreterError("Division by zero")
+                    return left / right
+
+        # For logical and comparison operations, ensure we have Truth objects
+        # Handle mixed types: convert numbers to tensors when needed
         if isinstance(left, (int, float)) and isinstance(right, torch.Tensor):
             # Convert scalar to tensor with same shape as the tensor operand
             left = torch.full_like(right, float(left))
@@ -265,23 +387,6 @@ class RuleInterpreter:
             left = Truth(_clamp01(left, self.default_eps), self.default_semantics)
         if isinstance(right, torch.Tensor):
             right = Truth(_clamp01(right, self.default_eps), self.default_semantics)
-
-        # Handle pure numeric operations (for constant definitions)
-        if isinstance(left, (int, float)) and isinstance(right, (int, float)):
-            if expr.operator == ">":
-                return float(left > right)
-            elif expr.operator == "<":
-                return float(left < right)
-            elif expr.operator == "==":
-                return float(left == right)
-            elif expr.operator == ">=":
-                return float(left >= right)
-            elif expr.operator == "<=":
-                return float(left <= right)
-            else:
-                raise UnsupportedOperationError(
-                    f"Operator {expr.operator} not supported for numeric constants"
-                )
 
         # Logical operations - ensure both operands are Truth objects
         if expr.operator == "|":  # OR
@@ -473,6 +578,36 @@ class RuleInterpreter:
                     f"OR_n operation", type(operand).__name__
                 )
 
+        elif expr.operator == "-":  # UNARY MINUS
+            if isinstance(operand, (int, float)):
+                # Negate numeric constants
+                return -operand
+            elif isinstance(operand, torch.Tensor):
+                # Negate tensor values
+                return -operand
+            elif isinstance(operand, Truth):
+                # Negate the underlying tensor values and create new Truth object
+                return Truth(-operand.value, operand.semantics)
+            else:
+                raise UnsupportedOperationError(
+                    f"UNARY MINUS operation", type(operand).__name__
+                )
+
+        elif expr.operator == "+":  # UNARY PLUS
+            if isinstance(operand, (int, float)):
+                # Unary plus on numeric constants (no-op)
+                return operand
+            elif isinstance(operand, torch.Tensor):
+                # Unary plus on tensor (no-op)
+                return operand
+            elif isinstance(operand, Truth):
+                # Unary plus on Truth object (no-op)
+                return operand
+            else:
+                raise UnsupportedOperationError(
+                    f"UNARY PLUS operation", type(operand).__name__
+                )
+
         else:
             raise UnsupportedOperationError(f"Unknown unary operator: {expr.operator}")
 
@@ -646,8 +781,14 @@ class RuleInterpreter:
 
         return (tensor > threshold).float()
 
-    def _at_least_k_function(self, probabilities: TensorTruth, k: int) -> Truth:
+    def _at_least_k_function(
+        self, probabilities: TensorTruth, k: Union[int, float]
+    ) -> Truth:
         """Create at-least-k constraint."""
+        # Convert float to int if it's a whole number
+        if isinstance(k, float) and k.is_integer():
+            k = int(k)
+
         if not isinstance(k, int) or k < 0:
             raise TypeMismatchError(
                 "non-negative integer", type(k).__name__, "k parameter"
@@ -656,8 +797,14 @@ class RuleInterpreter:
         tensor, semantics = self._prepare_truth_input(probabilities)
         return at_least_k(tensor, k, semantics=semantics, eps=self.default_eps, dim=-1)
 
-    def _at_most_k_function(self, probabilities: TensorTruth, k: int) -> Truth:
+    def _at_most_k_function(
+        self, probabilities: TensorTruth, k: Union[int, float]
+    ) -> Truth:
         """Create at-most-k constraint."""
+        # Convert float to int if it's a whole number
+        if isinstance(k, float) and k.is_integer():
+            k = int(k)
+
         if not isinstance(k, int) or k < 0:
             raise TypeMismatchError(
                 "non-negative integer", type(k).__name__, "k parameter"
@@ -666,8 +813,14 @@ class RuleInterpreter:
         tensor, semantics = self._prepare_truth_input(probabilities)
         return at_most_k(tensor, k, semantics=semantics, eps=self.default_eps, dim=-1)
 
-    def _exactly_k_function(self, probabilities: TensorTruth, k: int) -> Truth:
+    def _exactly_k_function(
+        self, probabilities: TensorTruth, k: Union[int, float]
+    ) -> Truth:
         """Create exactly-k constraint."""
+        # Convert float to int if it's a whole number
+        if isinstance(k, float) and k.is_integer():
+            k = int(k)
+
         if not isinstance(k, int) or k < 0:
             raise TypeMismatchError(
                 "non-negative integer", type(k).__name__, "k parameter"
