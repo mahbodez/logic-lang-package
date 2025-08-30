@@ -4,7 +4,7 @@
 
 ## Overview
 
-The Logic Language is a domain-specific language (DSL) designed for defining soft logic constraints in mammography classification. It allows you to replace hard-coded constraint logic with flexible, interpretable logic scripts that can be modified without changing Python code.
+The Logic Language is a domain-specific language (DSL) designed for defining soft/fuzzy logic constraints in mammography classification. It allows you to replace hard-coded constraint logic with flexible, interpretable logic scripts that can be modified without changing Python code.
 
 ## Installation
 
@@ -29,42 +29,6 @@ interpreter = RuleInterpreter()
 features = {"predictions": torch.tensor([[0.8, 0.1, 0.1]])} 
 script = "constraint exactly_one(predictions);" # also can load from .logic files
 constraint_set = interpreter.execute(script, features)
-```
-
-## ⚠️ Important Cautions
-
-### Batch Dimension Handling
-
-When using the `RuleMammoLoss` or `RuleBasedConstraintsLoss` with tensor indexing in your logic scripts, **you must explicitly account for the batch dimension**:
-
-```python
-# ✅ CORRECT: Always preserve batch dimension with ':' 
-define birads_4 = features[:, 4]           # Access feature 4 for all batch items
-define classes_4to6 = features[:, 4:7]     # Access features 4-6 for all batch items
-define view_cc = assessments[:, 0, :]      # Access CC view for all batch items
-
-# ❌ WRONG: These access batch items, not features!
-define birads_4 = features[4]              # Accesses batch item 4, not feature 4!
-define classes_4to6 = features[4:7]        # Accesses batch items 4-6!
-```
-
-**Why this matters:**
-- `RuleMammoLoss`/`RuleBasedConstraintsLoss` passes tensors with shape `(batch_size, ...)` to the interpreter
-- The first dimension is always the batch dimension
-- Logic operations need to work across the entire batch
-- Incorrect indexing will cause shape mismatches and unexpected behavior
-
-### Tensor Shape Awareness
-
-Always be aware of your tensor shapes when writing logic scripts:
-
-```python
-# If your features have shape (B, 7) for 7 BI-RADS classes:
-define high_birads = features[:, 4:]       # ✅ Classes 4,5,6 for all batches
-
-# If your assessments have shape (B, 2, 3) for 2 views, 3 radiologists:
-define cc_radiologist_1 = assessments[:, 0, 1]  # ✅ CC view, radiologist 1, all batches
-define mlo_consensus = assessments[:, 1, :]      # ✅ MLO view, all radiologists, all batches
 ```
 
 ## Syntax Reference
@@ -215,6 +179,42 @@ constraint exactly_one(comp) weight=1.5 transform="hinge" alpha=2.0
    # define high_birads = features[4:7]          # Would access batch items 4-6!
    ```
 
+## ⚠️ Important Cautions
+
+### Batch Dimension Handling
+
+When using the `RuleMammoLoss` or `RuleBasedConstraintsLoss` with tensor indexing in your logic scripts, **you must explicitly account for the batch dimension**:
+
+```python
+# ✅ CORRECT: Always preserve batch dimension with ':' 
+define birads_4 = features[:, 4]           # Access feature 4 for all batch items
+define classes_4to6 = features[:, 4:7]     # Access features 4-6 for all batch items
+define view_cc = assessments[:, 0, :]      # Access CC view for all batch items
+
+# ❌ WRONG: These access batch items, not features!
+define birads_4 = features[4]              # Accesses batch item 4, not feature 4!
+define classes_4to6 = features[4:7]        # Accesses batch items 4-6!
+```
+
+**Why this matters:**
+- `RuleMammoLoss`/`RuleBasedConstraintsLoss` pass tensors with shape `(batch_size, ...)` to the interpreter
+- The first dimension is always the batch dimension
+- Logic operations need to work across the entire batch
+- Incorrect indexing will cause shape mismatches and unexpected behavior
+
+### Tensor Shape Awareness
+
+Always be aware of your tensor shapes when writing logic scripts:
+
+```python
+# If your features have shape (B, 7) for 7 BI-RADS classes:
+define high_birads = features[:, 4:]       # ✅ Classes 4,5,6 for all batches
+
+# If your assessments have shape (B, 2, 3) for 2 views, 3 radiologists:
+define cc_radiologist_1 = assessments[:, 0, 1]  # ✅ CC view, radiologist 1, all batches
+define mlo_consensus = assessments[:, 1, :]      # ✅ MLO view, all radiologists, all batches
+```
+
 ### Parentheses
 
 Use parentheses to override operator precedence:
@@ -334,7 +334,7 @@ constraint result;
 
 ### `sum(probabilities, indices)`
 
-Sum probabilities for specified class indices:
+Sum probabilities for specified class indices along the last dimension:
 ```
 define high_birads_L = sum(birads_L, [4, 5, 6])
 define very_high_birads = sum(birads_L, [5, 6])
@@ -342,7 +342,7 @@ define very_high_birads = sum(birads_L, [5, 6])
 
 ### `exactly_one(probabilities)`
 
-Create exactly-one constraint for categorical probabilities:
+Create exactly-one constraint for categorical probabilities along the last dimension:
 ```
 constraint exactly_one(birads_L) weight=1.0
 ```
@@ -356,27 +356,33 @@ constraint mutual_exclusion(mass_L, mc_L) weight=0.5
 
 ### `at_least_k(probabilities, k)`
 
-Create constraint that at least k elements must be true:
+Create constraint that at least k elements must be true along the last dimension:
 ```
 define min_two_findings = at_least_k(findings_combined, 2)
 constraint min_two_findings weight=0.6
 ```
 
+**Caution:** `at_least_k` uses combinatorial logic and may be slow for large tensors or high k values.
+
 ### `at_most_k(probabilities, k)`
 
-Create constraint that at most k elements can be true:
+Create constraint that at most k elements can be true along the last dimension:
 ```
 define max_one_high_birads = at_most_k(high_birads_indicators, 1)
 constraint max_one_high_birads weight=0.7
 ```
 
+**Caution:** `at_most_k` uses combinatorial logic and may be slow for large tensors or high k values.
+
 ### `exactly_k(probabilities, k)`
 
-Create constraint that exactly k elements must be true:
+Create constraint that exactly k elements must be true along the last dimension:
 ```
 define exactly_two_radiologists = exactly_k(radiologist_agreement, 2)
 constraint exactly_two_radiologists weight=0.8
 ```
+
+**Caution:** `exactly_k` uses combinatorial logic and may be slow for large tensors or high k values.
 
 ### `threshold_implication(antecedent, consequent, threshold)`
 
@@ -668,7 +674,7 @@ constraint any_positive >> potential_pathology weight=0.7
 
 Access specific elements, patients, or subsets of multi-dimensional data:
 ```
-# REMEMBER: First dimension is always batch! Use [:, ...] to preserve batch dimension
+# REMEMBER: First dimension is always batch when using RuleMammoLoss or RuleBasedConstraintsLoss! Use [:, ...] to preserve batch dimension
 
 # Feature-wise access (CORRECT - preserves batch dimension)
 define birads_4 = features[:, 4]              # Feature 4 for all batch items
@@ -690,7 +696,7 @@ define feature_subset = features[:, 2:5]      # Specific feature range for all b
 define subset_consensus = & feature_subset
 constraint subset_consensus >> specialized_finding weight=0.8
 
-# WRONG - These would access batch items instead of features:
+# WRONG - These would access batch items instead of features when using RuleMammoLoss or RuleBasedConstraintsLoss:
 # define birads_4 = features[4]              # Accesses batch item 4!
 # define patient_subset = features[2:5]      # Accesses batch items 2-4!
 ```
@@ -754,6 +760,7 @@ def custom_risk_score(mass_prob, calc_prob, birads_prob):
 
 interpreter.add_builtin_function('risk_score', custom_risk_score)
 ```
+**Note**: Custom functions must handle batch dimensions appropriately and return either a PyTorch tensor or a Truth object. See `soft_logic.py` for reference on Truth objects.
 
 ### Dynamic Rule Updates
 
@@ -764,9 +771,9 @@ loss_fn.update_rules(new_rules_string)
 
 ### Multiple Semantics
 
-Choose different logical semantics:
-- **Gödel**: min/max operations (sharp decisions)
-- **Łukasiewicz**: bounded sum operations (smoother)
+Choose different logical semantics (the default is "Gödel"):
+- **Gödel**: min/max operations (sharp/tunable decision boundaries)
+- **Łukasiewicz**: bounded sum operations (smoother but easy to saturate)
 - **Product**: multiplication operations (independent probabilities)
 
 ```python
@@ -788,6 +795,9 @@ loss_fn = RuleMammoLoss(
 7. **⚠️ Mind the Batch Dimension**: Always use `[:, ...]` when indexing tensors from `RuleMammoLoss` or `RuleBasedConstraintsLoss`
 8. **Validate Tensor Shapes**: Print tensor shapes during development to verify indexing
 9. **Test with Different Batch Sizes**: Ensure your logic works with various batch sizes
+10. **Leverage Built-in Functions**: Use provided functions like `sum`, `exactly_one`, etc., to make the code cleaner and more efficient
+11. **Do Not Use Unbounded Variables**: The package is not designed for values outside $\mathbb{R}^{[0,1]}$ and you might get unexpected results and clipping issues.
+12. **Cautious Use of Arithmetic**: Since the logic language is primarily for $x \in \mathbb{R}^{[0,1]}$, be careful when using arithmetic operations to avoid values going out of bounds. Try to keep intermediate results within [0,1] and use built-in functions for common patterns.
 
 ## Migration from Hard-coded Constraints
 
