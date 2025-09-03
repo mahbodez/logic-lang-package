@@ -121,7 +121,7 @@ class ConstStatement(Statement):
     """Constant definition (e.g., const threshold = 0.7)."""
 
     name: str
-    value: Union[float, int, str]
+    value: Union[float, int, str, List[Any]]
 
 
 @dataclass

@@ -154,10 +154,10 @@ class RuleInterpreter:
                 # It's already a literal value (backward compatibility)
                 value = stmt.value
 
-            # Ensure the result is a constant (number or string)
-            if not isinstance(value, (int, float, str)):
+            # Ensure the result is a constant (number, string, or list-like)
+            if not isinstance(value, (int, float, str, list)):
                 raise InterpreterError(
-                    f"Constants must evaluate to numbers or strings, got {type(value).__name__}"
+                    f"Constants must evaluate to numbers, strings, or list-like objects, got {type(value).__name__}"
                 )
 
             self.variables[stmt.name] = value
