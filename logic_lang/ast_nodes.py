@@ -111,9 +111,11 @@ class DefineStatement(Statement):
 
 @dataclass
 class ExpectStatement(Statement):
-    """Variable expectation (e.g., expect left_birads, right_birads, mass_L)."""
+    """Variable expectation with optional aliasing (e.g., expect left_birads as birads_L, right_birads, mass_L)."""
 
-    names: List[str]
+    variables: List[
+        Union[str, tuple]
+    ]  # List of variable names or (original_name, alias) tuples
 
 
 @dataclass

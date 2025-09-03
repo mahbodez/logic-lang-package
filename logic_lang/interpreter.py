@@ -110,12 +110,21 @@ class RuleInterpreter:
         parser = RuleParser()
         ast = parser.parse(script)
 
-        # First pass: collect expected variables
+        # First pass: collect expected variables and set up aliases
         for statement in ast.statements:
             if isinstance(statement, ExpectStatement):
-                for name in statement.names:
-                    if name not in self.expected_variables:  # Avoid duplicates
-                        self.expected_variables.append(name)
+                for var in statement.variables:
+                    if isinstance(var, tuple):
+                        # Variable with alias: (original_name, alias)
+                        original_name, alias = var
+                        if (
+                            original_name not in self.expected_variables
+                        ):  # Avoid duplicates
+                            self.expected_variables.append(original_name)
+                    else:
+                        # Variable without alias
+                        if var not in self.expected_variables:  # Avoid duplicates
+                            self.expected_variables.append(var)
 
         # Validate that all expected variables are provided
         if features is None:
@@ -133,6 +142,17 @@ class RuleInterpreter:
 
         # Initialize with provided features
         self.variables.update(features)
+
+        # Second pass: set up aliases for variables
+        for statement in ast.statements:
+            if isinstance(statement, ExpectStatement):
+                for var in statement.variables:
+                    if isinstance(var, tuple):
+                        # Variable with alias: (original_name, alias)
+                        original_name, alias = var
+                        if original_name in self.variables:
+                            # Create alias in the variable environment
+                            self.variables[alias] = self.variables[original_name]
 
         # Execute statements
         for statement in ast.statements:
@@ -165,10 +185,21 @@ class RuleInterpreter:
             value = self._evaluate_expression(stmt.expression)
             self.variables[stmt.name] = value
         elif isinstance(stmt, ExpectStatement):
-            # Track expected variables (avoid duplicates)
-            for name in stmt.names:
-                if name not in self.expected_variables:
-                    self.expected_variables.append(name)
+            # Handle variable aliasing during execution
+            for var in stmt.variables:
+                if isinstance(var, tuple):
+                    # Variable with alias: (original_name, alias)
+                    original_name, alias = var
+                    if original_name in self.variables:
+                        # Create alias in the variable environment
+                        self.variables[alias] = self.variables[original_name]
+                    # Track expected variable (avoid duplicates)
+                    if original_name not in self.expected_variables:
+                        self.expected_variables.append(original_name)
+                else:
+                    # Variable without alias - just track it
+                    if var not in self.expected_variables:
+                        self.expected_variables.append(var)
         elif isinstance(stmt, ConstraintStatement):
             self._execute_constraint(stmt)
         else:

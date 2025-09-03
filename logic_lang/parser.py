@@ -1,7 +1,17 @@
 """
 Parser for the Logic language.
 
-Implements a recursive descent parser that converts logic scripts into AST.
+Implements a     # Token patterns
+    TOKEN_PATTERNS = [
+        ("COMMENT", r"#.*"),
+        ("CONST", r"\bconst\b"),
+        ("DEFINE", r"\bdefine\b"),
+        ("EXPECT", r"\bexpect\b"),
+        ("CONSTRAINT", r"\bconstraint\b"),
+        ("WEIGHT", r"\bweight\b"),
+        ("TRANSFORM", r"\btransform\b"),
+        ("AS", r"\bas\b"),  # Add AS keyword for aliasing
+        ("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*"),descent parser that converts logic scripts into AST.
 The grammar supports:
 - Variable expectations: expect var1, var2, var3
 - Variable definitions: define var_name = expression
@@ -59,6 +69,7 @@ class Lexer:
         ("CONSTRAINT", r"\bconstraint\b"),
         ("WEIGHT", r"\bweight\b"),
         ("TRANSFORM", r"\btransform\b"),
+        ("AS", r"\bas\b"),  # Add AS keyword for aliasing
         ("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*"),
         ("NUMBER", r"\d+\.?\d*([eE][+-]?\d+)?"),
         ("STRING", r'"[^"]*"|\'[^\']*\''),
@@ -203,18 +214,33 @@ class RuleParser:
         return DefineStatement(name=name_token.value, expression=expression)
 
     def _parse_expect(self) -> ExpectStatement:
-        """Parse variable expectation."""
+        """Parse variable expectation with optional aliasing."""
         self._consume("EXPECT")
 
-        # Parse comma-separated list of identifiers
-        names = []
-        names.append(self._consume("IDENTIFIER").value)
+        # Parse comma-separated list of identifiers with optional aliases
+        variables = []
 
+        # Parse first variable (required)
+        var_name = self._consume("IDENTIFIER").value
+        if not self._at_end() and self._peek().type == "AS":
+            self._consume("AS")
+            alias = self._consume("IDENTIFIER").value
+            variables.append((var_name, alias))
+        else:
+            variables.append(var_name)
+
+        # Parse additional variables
         while not self._at_end() and self._peek().type == "COMMA":
             self._consume("COMMA")
-            names.append(self._consume("IDENTIFIER").value)
+            var_name = self._consume("IDENTIFIER").value
+            if not self._at_end() and self._peek().type == "AS":
+                self._consume("AS")
+                alias = self._consume("IDENTIFIER").value
+                variables.append((var_name, alias))
+            else:
+                variables.append(var_name)
 
-        return ExpectStatement(names=names)
+        return ExpectStatement(variables=variables)
 
     def _parse_constraint(self) -> ConstraintStatement:
         """Parse constraint statement."""

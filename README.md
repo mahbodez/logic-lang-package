@@ -26,8 +26,11 @@ pip install logic-lang
 from logic_lang import RuleInterpreter
 
 interpreter = RuleInterpreter()
-features = {"predictions": torch.tensor([[0.8, 0.1, 0.1]])} 
-script = "constraint exactly_one(predictions);" # also can load from .logic files
+features = {"model_predictions": torch.tensor([[0.8, 0.1, 0.1]])} 
+script = """
+expect model_predictions as predictions
+constraint exactly_one(predictions) weight=1.0
+"""
 constraint_set = interpreter.execute(script, features)
 ```
 
@@ -57,10 +60,12 @@ const constant_name = value
 
 ### Variable Expectations
 
-Declare which variables (features) the script expects to be provided:
+Declare which variables (features) the script expects to be provided, with optional aliasing using the `as` keyword:
 ```
 expect variable_name
 expect variable1, variable2, variable3
+expect original_name as alias_name
+expect var1 as alias1, var2, var3 as alias3
 ```
 
 Examples:
@@ -71,6 +76,13 @@ expect left_birads, right_birads, mass_L, mc_L
 # Or declare them individually
 expect comp
 expect risk_score
+
+# Use aliasing to rename variables for consistency
+expect left_birads as birads_L, right_birads as birads_R
+expect mass_left as mass_L, mass_right as mass_R
+
+# Mix aliased and non-aliased variables
+expect predictions as preds, labels, confidence as conf
 
 # Define constants for thresholds
 const high_threshold = 0.8
