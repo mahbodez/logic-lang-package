@@ -8,6 +8,7 @@ for common constraint patterns.
 
 from typing import Callable, Dict, Any, List, Union, Optional, Tuple
 import torch
+import hashlib
 from .soft_logic import (
     Truth,
     Constraint,
@@ -56,13 +57,26 @@ class RuleInterpreter:
     """
 
     def __init__(
-        self, default_semantics: Optional[Semantics] = None, default_eps: float = 1e-6
+        self,
+        default_semantics: Optional[Semantics] = None,
+        default_eps: float = 1e-6,
+        enable_caching: bool = False,
+        cache_size: int = 1000,
     ):
         self.variables: Dict[str, Any] = {}
         self.constraints: List[Constraint] = []
         self.expected_variables: List[str] = []  # Track expected variables
         self.default_semantics = default_semantics or GodelSemantics(eps=default_eps)
         self.default_eps = default_eps
+
+        # Caching infrastructure
+        self.enable_caching = enable_caching
+        self.cache_size = cache_size
+        self.expression_cache: Dict[str, Any] = {}
+        self.function_cache: Dict[str, Any] = {}
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self._variables_hash = None  # Track when variables change
 
         # Built-in functions
         self.builtin_functions = {
@@ -87,6 +101,116 @@ class RuleInterpreter:
             "threshold": self._threshold_function,
         }
 
+    def _get_variables_hash(self) -> str:
+        """Generate a hash of current variable state for cache invalidation."""
+        if not self.enable_caching:
+            return ""
+
+        try:
+            # Create a deterministic representation of variables
+            var_items = sorted(self.variables.items())
+            var_repr = []
+
+            for name, value in var_items:
+                if isinstance(value, torch.Tensor):
+                    # Use tensor hash for deterministic representation
+                    var_repr.append((name, value.shape, value.dtype, value.device.type))
+                else:
+                    var_repr.append((name, str(type(value)), str(value)))
+
+            return hashlib.md5(str(var_repr).encode()).hexdigest()
+        except Exception:
+            # Fallback: always invalidate cache if hashing fails
+            return str(hash(tuple(self.variables.keys())))
+
+    def _clear_cache(self):
+        """Clear all caches."""
+        if self.enable_caching:
+            self.expression_cache.clear()
+            self.function_cache.clear()
+            # Don't update variables_hash here to avoid recursion
+
+    def _check_cache_validity(self) -> bool:
+        """Check if current cache is still valid based on variable state."""
+        if not self.enable_caching:
+            return False
+
+        current_hash = self._get_variables_hash()
+        if self._variables_hash is None:
+            self._variables_hash = current_hash
+            return True  # Cache is valid if we just set the hash
+
+        if self._variables_hash != current_hash:
+            self._variables_hash = current_hash
+            self._clear_cache()
+            return False
+        return True
+
+    def _generate_expression_key(self, expr: Expression) -> str:
+        """Generate a cache key for an expression."""
+        if not self.enable_caching:
+            return ""
+
+        try:
+            # Create a deterministic representation of the expression
+            expr_repr = self._expression_to_string(expr)
+            variables_hash = self._get_variables_hash()
+            return hashlib.md5(f"{expr_repr}:{variables_hash}".encode()).hexdigest()
+        except Exception:
+            # If we can't hash it, don't cache it
+            return ""
+
+    def _expression_to_string(self, expr: Expression) -> str:
+        """Convert expression to a string representation for caching."""
+        if isinstance(expr, Identifier):
+            return f"ID:{expr.name}"
+        elif isinstance(expr, NumberLiteral):
+            return f"NUM:{expr.value}"
+        elif isinstance(expr, StringLiteral):
+            return f"STR:{expr.value}"
+        elif isinstance(expr, ListLiteral):
+            elements_str = ",".join(
+                self._expression_to_string(elem) for elem in expr.elements
+            )
+            return f"LIST:[{elements_str}]"
+        elif isinstance(expr, BinaryOp):
+            left_str = self._expression_to_string(expr.left)
+            right_str = self._expression_to_string(expr.right)
+            return f"BIN:{expr.operator}({left_str},{right_str})"
+        elif isinstance(expr, UnaryOp):
+            operand_str = self._expression_to_string(expr.operand)
+            return f"UN:{expr.operator}({operand_str})"
+        elif isinstance(expr, FunctionCall):
+            args_str = ",".join(self._expression_to_string(arg) for arg in expr.args)
+            return f"FN:{expr.name}([{args_str}])"
+        elif isinstance(expr, IndexExpression):
+            obj_str = self._expression_to_string(expr.object)
+            indices_str = ",".join(
+                self._expression_to_string(idx) for idx in expr.indices
+            )
+            return f"IDX:{obj_str}[{indices_str}]"
+        elif isinstance(expr, SliceExpression):
+            start_str = self._expression_to_string(expr.start) if expr.start else "None"
+            stop_str = self._expression_to_string(expr.stop) if expr.stop else "None"
+            step_str = self._expression_to_string(expr.step) if expr.step else "None"
+            return f"SLICE:{start_str}:{stop_str}:{step_str}"
+        else:
+            return f"UNKNOWN:{type(expr).__name__}"
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for performance monitoring."""
+        total_requests = self.cache_hits + self.cache_misses
+        hit_rate = self.cache_hits / total_requests if total_requests > 0 else 0.0
+
+        return {
+            "cache_enabled": self.enable_caching,
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
+            "hit_rate": hit_rate,
+            "expression_cache_size": len(self.expression_cache),
+            "function_cache_size": len(self.function_cache),
+        }
+
     def execute(
         self, script: str, features: Dict[str, torch.Tensor] = None
     ) -> ConstraintSet:
@@ -102,9 +226,10 @@ class RuleInterpreter:
         """
         from .parser import RuleParser
 
-        # Reset state
+        # Reset state and initialize cache
         self.constraints = []
         self.expected_variables = []
+        self._clear_cache()  # Clear cache at start of execution
 
         # Parse script first to collect expect statements
         parser = RuleParser()
@@ -142,6 +267,7 @@ class RuleInterpreter:
 
         # Initialize with provided features
         self.variables.update(features)
+        self._variables_hash = self._get_variables_hash()  # Initialize variables hash
 
         # Second pass: set up aliases for variables
         for statement in ast.statements:
@@ -153,6 +279,9 @@ class RuleInterpreter:
                         if original_name in self.variables:
                             # Create alias in the variable environment
                             self.variables[alias] = self.variables[original_name]
+                            self._variables_hash = (
+                                None  # Invalidate cache when variables change
+                            )
 
         # Execute statements
         for statement in ast.statements:
@@ -181,9 +310,11 @@ class RuleInterpreter:
                 )
 
             self.variables[stmt.name] = value
+            self._variables_hash = None  # Invalidate cache when variables change
         elif isinstance(stmt, DefineStatement):
             value = self._evaluate_expression(stmt.expression)
             self.variables[stmt.name] = value
+            self._variables_hash = None  # Invalidate cache when variables change
         elif isinstance(stmt, ExpectStatement):
             # Handle variable aliasing during execution
             for var in stmt.variables:
@@ -253,6 +384,43 @@ class RuleInterpreter:
 
     def _evaluate_expression(self, expr: Expression) -> Any:
         """Evaluate an expression and return its value."""
+        cache_key = ""
+
+        # Check cache first
+        if self.enable_caching:
+            cache_key = self._generate_expression_key(expr)
+            if cache_key and self._check_cache_validity():
+                if cache_key in self.expression_cache:
+                    self.cache_hits += 1
+                    return self.expression_cache[cache_key]
+            self.cache_misses += 1
+
+        # Evaluate the expression
+        result = self._evaluate_expression_uncached(expr)
+
+        # Cache the result
+        if self.enable_caching and cache_key:
+            # Implement simple LRU by removing oldest entries when cache is full
+            if len(self.expression_cache) >= self.cache_size:
+                # Remove 20% of oldest entries
+                items_to_remove = max(1, len(self.expression_cache) // 5)
+                for _ in range(items_to_remove):
+                    self.expression_cache.pop(next(iter(self.expression_cache)))
+
+            # Only cache immutable results or create safe copies
+            if self._is_cacheable(result):
+                self.expression_cache[cache_key] = result
+
+        return result
+
+    def _is_cacheable(self, value: Any) -> bool:
+        """Determine if a value is safe to cache."""
+        # Cache numbers, strings, and lists (which are immutable)
+        # Don't cache tensors directly as they might be modified
+        return isinstance(value, (int, float, str, list))
+
+    def _evaluate_expression_uncached(self, expr: Expression) -> Any:
+        """Evaluate an expression without caching."""
         if isinstance(expr, Identifier):
             if expr.name not in self.variables:
                 raise VariableNotFoundError(expr.name)
@@ -721,14 +889,63 @@ class RuleInterpreter:
         return expr
 
     def _evaluate_function_call(self, expr: FunctionCall) -> Any:
-        """Evaluate function calls."""
+        """Evaluate function calls with caching for expensive operations."""
         if expr.name not in self.builtin_functions:
             available_functions = sorted(self.builtin_functions.keys())
             raise InvalidFunctionError(expr.name, available_functions)
 
+        # Check if this is a cacheable function (expensive operations)
+        cacheable_functions = {
+            "sum",
+            "exactly_one",
+            "mutual_exclusion",
+            "at_least_k",
+            "at_most_k",
+            "exactly_k",
+            "threshold_implication",
+            "conditional_probability",
+        }
+
+        cache_key = ""
+        if self.enable_caching and expr.name in cacheable_functions:
+            # Generate cache key for function call
+            try:
+                args_repr = []
+                for arg in expr.args:
+                    arg_str = self._expression_to_string(arg)
+                    args_repr.append(arg_str)
+
+                func_repr = f"FN:{expr.name}({','.join(args_repr)})"
+                variables_hash = self._get_variables_hash()
+                cache_key = hashlib.md5(
+                    f"{func_repr}:{variables_hash}".encode()
+                ).hexdigest()
+
+                if self._check_cache_validity() and cache_key in self.function_cache:
+                    self.cache_hits += 1
+                    return self.function_cache[cache_key]
+
+                self.cache_misses += 1
+            except Exception:
+                # If caching fails, proceed without cache
+                cache_key = ""
+
         try:
             args = [self._evaluate_expression(arg) for arg in expr.args]
-            return self.builtin_functions[expr.name](*args)
+            result = self.builtin_functions[expr.name](*args)
+
+            # Cache the result if it's a cacheable function
+            if cache_key and self._is_cacheable(result):
+                # Implement simple LRU for function cache
+                if len(self.function_cache) >= self.cache_size:
+                    items_to_remove = max(1, len(self.function_cache) // 5)
+                    for _ in range(items_to_remove):
+                        self.function_cache.pop(next(iter(self.function_cache)))
+
+                self.function_cache[cache_key] = result
+
+            return result
+
         except TypeError as e:
             # Provide more helpful error message for function call issues
             raise InterpreterError(
@@ -974,6 +1191,7 @@ class RuleInterpreter:
     def set_variable(self, name: str, value: Any) -> None:
         """Set a variable in the interpreter environment."""
         self.variables[name] = value
+        self._variables_hash = None  # Invalidate cache when variables change
 
     def get_variable(self, name: str) -> Any:
         """Get a variable from the interpreter environment."""
@@ -984,6 +1202,7 @@ class RuleInterpreter:
     def clear_variables(self) -> None:
         """Clear all variables from the interpreter environment."""
         self.variables.clear()
+        self._clear_cache()  # Clear cache when all variables are cleared
 
     def add_builtin_function(self, name: str, func: Callable) -> None:
         """Add a custom built-in function."""
