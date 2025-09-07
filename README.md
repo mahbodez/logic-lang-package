@@ -412,6 +412,14 @@ define conditional_findings = conditional_probability(high_birads_L, findings_L,
 constraint conditional_findings weight=0.8
 ```
 
+### `iff(left, right)`
+
+Create logical biconditional (if and only if) constraint:
+```
+define balanced_assessment = iff(risk_L, risk_R)
+constraint balanced_assessment weight=0.4
+```
+
 ### `clamp(tensor, min_val, max_val)`
 
 Clamp tensor values to specified range:

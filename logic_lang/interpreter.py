@@ -21,6 +21,7 @@ from .soft_logic import (
     exactly_k,
     threshold_implication,
     conditional_probability,
+    iff,
     GodelSemantics,
     LukasiewiczSemantics,
     ProductSemantics,
@@ -91,6 +92,7 @@ class RuleInterpreter:
             # Logical implication and conditional functions
             "threshold_implication": self._threshold_implication_function,
             "conditional_probability": self._conditional_probability_function,
+            "iff": self._iff_function,
             # Comparison and threshold functions
             "greater_than": self._greater_than_function,
             "less_than": self._less_than_function,
@@ -1128,6 +1130,12 @@ class RuleInterpreter:
             semantics=condition_truth.semantics,
             eps=self.default_eps,
         )
+    
+    def _iff_function(self, left: TensorTruth, right: TensorTruth) -> Truth:
+        """Create logical biconditional (if and only if) constraint."""
+        left_truth = self._convert_to_truth(left)
+        right_truth = self._convert_to_truth(right)
+        return iff(left_truth, right_truth)
 
     def _greater_than_function(self, left: TensorTruth, right: TensorTruth) -> Truth:
         """Create greater than comparison."""

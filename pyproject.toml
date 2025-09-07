@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logic-lang"
-version = "0.2.3"
+version = "0.2.4"
 authors = [{ name = "Mahbod Issaiy", email = "mahbodissaiy2@gmail.com" }]
 description = "A domain-specific language for defining soft logic constraints in medical/general domains"
 readme = "README.md"

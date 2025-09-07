@@ -650,6 +650,9 @@ class ConstraintSet:
 # Common Logic Rules and Patterns
 # -------------------------------------------------------------
 
+def iff(a: Truth, b: Truth) -> Truth:
+    """Logical biconditional (if and only if): A ⇔ B  <=>  (A ⇒ B) ∧ (B ⇒ A)."""
+    return (a >> b) & (b >> a)
 
 def exactly_one(
     probabilities: Union[Tensor, Truth],
