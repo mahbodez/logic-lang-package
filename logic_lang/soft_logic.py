@@ -153,20 +153,13 @@ class ProductSemantics(Semantics):
             self.eps,
         )
 
-    def IMPLIES(self, a: Tensor, b: Tensor) -> Tensor:
-        # 1 - a + a*b
-        return _clamp01(1.0 - a + self.AND(a, b), self.eps)
-
-    def XOR(self, a: Tensor, b: Tensor) -> Tensor:
-        return _clamp01(a + b - 2.0 * self.AND(a, b), self.eps)
-
     def GT(self, a: Tensor, b: Tensor) -> Tensor:
         # Smooth greater than using sigmoid: high when a > b
         return torch.sigmoid(self.sharpness * (a - b))
 
     def LT(self, a: Tensor, b: Tensor) -> Tensor:
         # Smooth less than: high when a < b
-        return torch.sigmoid(self.sharpness * (b - a))
+        return self.GT(b, a)
 
     def EQ(self, a: Tensor, b: Tensor) -> Tensor:
         # Smooth equals: high when |a - b| is small
@@ -197,13 +190,15 @@ class LukasiewiczSemantics(Semantics):
         return _clamp01(a + b - 1.0, self.eps)
 
     def AND_n(self, xs: Sequence[Tensor]) -> Tensor:
+        # Exact n-ary Łukasiewicz t-norm: max(sum(xs) - (n - 1), 0)
         if not xs:
             raise ValueError("AND_n requires at least one operand")
         if len(xs) == 1:  # single element, no need to stack
             return xs[0]
         xs = torch.broadcast_tensors(*xs)
         x = torch.stack(xs, dim=0)
-        return _clamp01(torch.min(x, dim=0).values, self.eps)
+        n = x.shape[0]
+        return _clamp01(torch.sum(x, dim=0) - (n - 1.0), self.eps)
 
     def OR(self, a: Tensor, b: Tensor) -> Tensor:
         # min(a + b, 1) - exact Lukasiewicz t-conorm
@@ -216,24 +211,25 @@ class LukasiewiczSemantics(Semantics):
             return xs[0]
         xs = torch.broadcast_tensors(*xs)
         x = torch.stack(xs, dim=0)
-        return _clamp01(torch.sum(x, dim=0), self.eps)
+        # Smooth t-conorm cap to avoid early saturation while respecting [0,1]
+        s = torch.sum(x, dim=0)
+        # Soft-cap at 1: 1 - softplus(beta*(1 - s))/beta behaves like min(s,1) as beta->inf
+        # using semantics sharpness as beta
+        capped = 1.0 - _softplus(1.0 - s, self.sharpness)
+        return _clamp01(capped, self.eps)
 
     def IMPLIES(self, a: Tensor, b: Tensor) -> Tensor:
         # min(1, 1 - a + b) - exact Lukasiewicz implication
         return _clamp01(1.0 - a + b, self.eps)
 
     def GT(self, a: Tensor, b: Tensor) -> Tensor:
-        # Lukasiewicz-style greater than: max(a - b, 0) scaled and shifted
-        # Scale to [0,1] and apply smooth transition
-        diff = a - b
-        # Smooth version of max(diff, 0) using softplus
-        smooth_max = _softplus(diff, self.sharpness)
-        # Sigmoid to map to [0,1] probabilities
-        return torch.sigmoid(self.sharpness * smooth_max)
+        # Piecewise-linear comparator consistent with Łukasiewicz style:
+        # GT(a,b) = clamp(a - b, 0, 1)
+        return _clamp01(a - b, self.eps)
 
     def LT(self, a: Tensor, b: Tensor) -> Tensor:
-        # Lukasiewicz-style less than: max(b - a, 0) scaled
-        return self.GT(b, a)
+        # LT(a,b) = clamp(b - a, 0, 1)
+        return _clamp01(b - a, self.eps)
 
     def EQ(self, a: Tensor, b: Tensor) -> Tensor:
         # Lukasiewicz-style equality: 1 - |a - b| clamped to [0,1]
@@ -313,10 +309,6 @@ class GodelSemantics(Semantics):
         xs = torch.broadcast_tensors(*xs)
         x = torch.stack(xs, dim=0)
         return _clamp01(torch.logsumexp(self.tau * x, dim=0) / self.tau, self.eps)
-
-    def IMPLIES(self, a: Tensor, b: Tensor) -> Tensor:
-        # use default (¬a ∨ b) to inherit softmax OR
-        return _clamp01(super().IMPLIES(a, b), self.eps)
 
     def GT(self, a: Tensor, b: Tensor) -> Tensor:
         # Gödel-style greater than using smooth approximation
